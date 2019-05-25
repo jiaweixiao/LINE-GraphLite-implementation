@@ -1,0 +1,24 @@
+#!/bin/bash
+
+export JAVA_HOME=/home/bdms/setup/jdk1.8.0_151
+export GRAPHLITE_HOME=/home/bdms/setup/GraphLite-0.20
+export HADOOP_HOME=/home/bdms/setup/hadoop-2.9.2
+
+# -----------------------------------------------------------------------------
+# STOP: no need to change the following
+
+# java
+export JRE_HOME=${JAVA_HOME}/jre
+export CLASSPATH=.:$JAVA_HOME/lib:$JRE_HOME/lib
+
+# hadoop
+export CLASSPATH=$CLASSPATH:`$HADOOP_HOME/bin/hadoop classpath --glob`
+
+export PATH=$PATH:$JAVA_HOME/bin:$JRE_HOME/bin:${GRAPHLITE_HOME}/bin
+
+machine=`uname -m`
+if [ ${machine} == 'x86_64' ]; then
+export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$JRE_HOME/lib/amd64/server
+else
+export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$JRE_HOME/lib/i386/server
+fi
