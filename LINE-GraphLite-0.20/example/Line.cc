@@ -7,7 +7,7 @@
 
 #include "GraphLite.h"
 
-#define VERTEX_CLASS_NAME(name) KCore##name
+#define VERTEX_CLASS_NAME(name) LINE##name
 
 #define EPS 1e-6
 #define SAMPLE_NUM 16
