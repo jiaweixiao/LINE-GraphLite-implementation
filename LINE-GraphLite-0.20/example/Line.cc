@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <vector>
 #include <math.h>
 #include <map>
 
@@ -17,7 +18,7 @@
 
 typedef float real;
 typedef enum {START, END, NEG} vertex_type;//start,end,negative vertex
-typedef int VertexWeit;
+typedef double VertexWeit;
 struct VertexMsg{
     int type; // message type: 1,2,3
     int64_t source_id; // start vertex of edge
@@ -44,8 +45,8 @@ struct VertexMsg{
 
 };
 struct VertexVal{
-    real emb_vertex[VERTEX_DIM];
-    real emb_context[VERTEX_DIM];
+    real *emb_vertex;
+    real *emb_context;
 };
 
 
@@ -81,7 +82,17 @@ public:
         unsigned long long to;
         VertexWeit weight = 0;
         
-        int value = 0;
+        struct VertexVal value = 0;
+        // init embedding
+        posix_memalign((void **)&(value.emb_vertex), 128, (long long)VERTEX_DIM * sizeof(real));
+        posix_memalign((void **)&(value.emb_context), 128, (long long)VERTEX_DIM * sizeof(real));
+        if (value.emb_vertex == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
+        if (value.emb_context == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
+        for (int b = 0; b < VERTEX_DIM; b++) {
+            emb_vertex[b] = (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+            emb_context[b] = 0;
+        }
+
         int outdegree = 0;
         
         const char *line= getEdgeLine();
@@ -169,12 +180,13 @@ private:
 
     /* Parameters in ROOT */
     long long num_edges;
+
     // Parameters for edge sampling
     long long *alias;
     double *prob;
 
-    vector<VertexWeit> *edge_weight;
-    vector<int64_t> *edge_source_id, *edge_target_id;
+    std::vector<VertexWeit> *edge_weight;
+    std::vector<int64_t> *edge_source_id, *edge_target_id;
     int64_t *vertex_hash_table, *neg_table;
 
 public:
@@ -183,9 +195,8 @@ public:
         int64_t vid = getVertexId();
 
         if (getSuperstep() == 0) {
-            // all vertexes send edge information to root vertex
+            // all vertices send edge information to root vertex
             OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
-			// int64_t out_degree = outEdgeIterator.size();
             VertexMsg msg;
             msg.type = 1;
             msg.source_vid = vid;
@@ -194,11 +205,13 @@ public:
                 msg.edge_weight = outEdgeIterator.getValue();      
                 sendMessageTo(ROOT, msg);
             }
-        } else {
+        } else if (getSuperstep() == 1){
             // root vertex initialize sample tables in superStep 1
-            if(getSuperstep() == 1 && vid == ROOT){
-
+            if(vid == ROOT){
                 num_edges = 0;
+                edge_source_id = new std::vector<int64_t>();
+                edge_target_id = new std::vector<int64_t>();
+                edge_weight = new std::vector<VertexWeit>();
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
                     VertexMess msg = pmsgs->getValue();
@@ -209,17 +222,12 @@ public:
                         edge_weight->push_back(msg.edge_weight);
                     }
                 }
-                // root itself
-                OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
-                for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {    
-                    num_edges += 1;
-                    edge_source_id->push_back(vid);
-                    edge_target_id->push_back(outEdgeIterator.target());
-                    edge_weight->push_bach(outEdgeIterator.getValue());
-                }
 
                 InitAliasTable();
+            } else {
+
             }
+        } else {
             //root vertex sample and send result to related vertex;
             if(vid == ROOT){
 
@@ -259,8 +267,8 @@ public:
     	long long num_small_block = 0, num_large_block = 0;
 
     	/* need edge_weight[] */
-    	for (long long k = 0; k != num_edges; k++) sum += ;
-    	for (long long k = 0; k != num_edges; k++) norm_prob[k] = ;
+    	for (long long k = 0; k != num_edges; k++) sum += edge_weight[k];
+    	for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight[k] * num_edges / sum;
 
     	for (long long k = num_edges - 1; k >= 0; k--) {
     		if (norm_prob[k] < 1)
