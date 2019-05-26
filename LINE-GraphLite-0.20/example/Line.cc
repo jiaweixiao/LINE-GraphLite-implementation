@@ -17,15 +17,15 @@
 
 typedef float real;
 typedef enum {START, END, NEG} vertex_type;//start,end,negative vertex
+typedef int VertexWeit;
 struct VertexMsg{
     int type; // message type: 1,2,3
-    int64_t start_vid; // start vertex of edge
-    int64_t end_vid;   // end vertex of edge
+    int64_t source_id; // start vertex of edge
+    int64_t target_id;   // end vertex of edge
 
     /* Type 1 Message: all vertexes send vertex and edge data to root vertex  */
     /* ---------------------------------1------------------------------------ */
-    int w_edge; // weight of edge
-    long degree_weight_sum; // all degree weight of vertex
+    VertexWeit edge_weight; // weight of edge
     /* ---------------------------------------------------------------------- */
 
     /* Type 2 Message: root vertex send sample edge and vertex data to related
@@ -79,7 +79,7 @@ public:
         unsigned long long last_vertex;
         unsigned long long from;
         unsigned long long to;
-        int weight = 0;
+        VertexWeit weight = 0;
         
         int value = 0;
         int outdegree = 0;
@@ -89,7 +89,7 @@ public:
         // Note: modify this if an edge weight is to be read
         //       modify the 'weight' variable
 
-        sscanf(line, "%lld %lld", &from, &to);
+        sscanf(line, "%lld %lld %d", &from, &to, &weight);
         addEdge(from, to, &weight);
 
         last_vertex = from;
@@ -100,7 +100,7 @@ public:
             // Note: modify this if an edge weight is to be read
             //       modify the 'weight' variable
 
-            sscanf(line, "%lld %lld", &from, &to);
+            sscanf(line, "%lld %lld %d", &from, &to, &weight);
             if (last_vertex != from) {
                 addVertex(last_vertex, &value, outdegree);
                 last_vertex = from;
@@ -163,7 +163,7 @@ public:
     }
 };
 
-class VERTEX_CLASS_NAME(): public Vertex <VertexVal, int, VertexMsg> {
+class VERTEX_CLASS_NAME(): public Vertex <VertexVal, VertexWeit, VertexMsg> {
 private:
     int k; //input parameter K
 
@@ -173,7 +173,9 @@ private:
     long long *alias;
     double *prob;
 
-    int *vertex_hash_table, *neg_table;
+    vector<VertexWeit> *edge_weight;
+    vector<int64_t> *edge_source_id, *edge_target_id;
+    int64_t *vertex_hash_table, *neg_table;
 
 public:
     void compute(MessageIterator* pmsgs) {
@@ -184,23 +186,39 @@ public:
             // all vertexes send edge information to root vertex
             OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
 			// int64_t out_degree = outEdgeIterator.size();
-            int weight_sum = 0;
-            VertexMess message;
-            message.type = 1;
-            message.start_vid = vid;
+            VertexMsg msg;
+            msg.type = 1;
+            msg.source_vid = vid;
             for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {
-                int64_t targetId = outEdgeIterator.target();
-                int weight = outEdgeIterator.getValue();
-                weight_sum += weight;
-                message.end_vid = targetId;
-                message.w_edge = weight;
-                message.degree_weight_sum = weight_sum;
-                sendMessageTo(ROOT, message);
+                msg.target_vid = outEdgeIterator.target();
+                msg.edge_weight = outEdgeIterator.getValue();      
+                sendMessageTo(ROOT, msg);
             }
         } else {
             // root vertex initialize sample tables in superStep 1
             if(getSuperstep() == 1 && vid == ROOT){
-		InitAliasTable();
+
+                num_edges = 0;
+                // process message
+                for ( ; ! pmsgs->done(); pmsgs->next() ) {
+                    VertexMess msg = pmsgs->getValue();
+                    if (msg.type == 1){
+                        num_edges += 1;
+                        edge_source_id->push_back(msg.source_id);
+                        edge_target_id->push_back(msg.target_id);
+                        edge_weight->push_back(msg.edge_weight);
+                    }
+                }
+                // root itself
+                OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
+                for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {    
+                    num_edges += 1;
+                    edge_source_id->push_back(vid);
+                    edge_target_id->push_back(outEdgeIterator.target());
+                    edge_weight->push_bach(outEdgeIterator.getValue());
+                }
+
+                InitAliasTable();
             }
             //root vertex sample and send result to related vertex;
             if(vid == ROOT){
@@ -210,11 +228,10 @@ public:
             if(getSuperstep() != 1 || vid != ROOT){
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
+                    VertexMess msg = pmsgs->getValue();
+                    if (msg.type == 2){
 
-                    VertexMess mess = pmsgs->getValue();
-                    if (mess.type == 2){
-
-                    } else if (mess.type == 3){
+                    } else if (msg.type == 3){
 
                     }
                 }
