@@ -25,7 +25,7 @@ struct VertexMsg{
     /* Type 1 Message: all vertexes send vertex and edge data to root vertex  */
     /* ---------------------------------1------------------------------------ */
     int w_edge; // weight of edge
-    long degree_wight_sum; // all degree weight of vertex
+    long degree_weight_sum; // all degree weight of vertex
     /* ---------------------------------------------------------------------- */
 
     /* Type 2 Message: root vertex send sample edge and vertex data to related
@@ -194,7 +194,7 @@ public:
                 weight_sum += weight;
                 message.end_vid = targetId;
                 message.w_edge = weight;
-                message.degree_wight_sum = weight_sum;
+                message.degree_weight_sum = weight_sum;
                 sendMessageTo(ROOT, message);
             }
         } else {
