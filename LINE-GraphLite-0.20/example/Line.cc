@@ -200,7 +200,7 @@ public:
         } else {
             // root vertex initialize sample tables in superStep 1
             if(getSuperstep() == 1 && vid == ROOT){
-
+		InitAliasTable();
             }
             //root vertex sample and send result to related vertex;
             if(vid == ROOT){
@@ -220,6 +220,56 @@ public:
                 }
             }
         }
+    }
+	/* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
+    void InitAliasTable() {
+    	alias = (long long *)malloc(num_edges*sizeof(long long));
+    	prob = (double *)malloc(num_edges*sizeof(double));
+    	if (alias == NULL || prob == NULL) {
+    		printf("Error: memory allocation failed!\n");
+    		exit(1);
+    	}
+    	double *norm_prob = (double *)malloc(num_edges*sizeof(double));
+    	long long *large_block = (long long *)malloc(num_edges*sizeof(long long));
+    	long long *small_block = (long long *)malloc(num_edges*sizeof(long long));
+    	if (norm_prob == NULL || large_block == NULL || small_block == NULL) {
+    		printf("Error: memory allocatiion failed!\n");
+    		exit(1);
+    	}
+
+    	double sum = 0;
+    	long long cur_small_block, cur_large_block;
+    	long long num_small_block = 0, num_large_block = 0;
+
+    	/* need edge_weight[] */
+    	for (long long k = 0; k != num_edges; k++) sum += ;
+    	for (long long k = 0; k != num_edges; k++) norm_prob[k] = ;
+
+    	for (long long k = num_edges - 1; k >= 0; k--) {
+    		if (norm_prob[k] < 1)
+    			small_block[num_small_block++] = k;
+    		else
+    			large_block[num_large_block++] = k;
+    	}
+
+    	while (num_small_block && num_large_block) {
+    		cur_small_block = small_block[--num_small_block];
+    		cur_large_block = large_block[--num_large_block];
+    		prob[cur_small_block] = norm_prob[cur_small_block];
+    		alias[cur_small_block] = cur_large_block;
+    		norm_prob[cur_large_block] = norm_prob[cur_large_block] + norm_prob[cur_small_block] - 1;
+    		if (norm_prob[cur_large_block] < 1)
+    			small_block[num_small_block++] = cur_large_block;
+    		else
+    			large_block[num_large_block++] = cur_large_block;
+    	}
+
+    	while (num_large_block) prob[large_block[--num_large_block]] = 1;
+    	while (num_small_block) prob[small_block[--num_small_block]] = 1;
+
+    	free(norm_prob);
+    	free(small_block);
+    	free(large_block);
     }
 };
 
