@@ -1,3 +1,11 @@
+/**
+ * @author  SUN Qian, XIAO Jiawei, ZHANG Yunfei
+ * @version 0.1
+ * 
+ * @email sunqian18s@ict.ac.cn, zhangyunfei18s@ict.ac.cn, zhangyunfei18s@ict.ac.cn
+ *
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -18,24 +26,33 @@
 #define MAX_STRING 100
 #define SIGMOID_BOUND 6
 #define NEG_SAMPLING_POWER 0.75
+#define NEG_TABLE_SIZE 1e8
+
+#define SIGMOID_TABLE_SIZE 1000
+
 
 int order = 1; //input parameter order
 int parallel_num = 1;
 
 typedef float real;
-typedef enum {START, END, NEG} vertex_type;//start,end,negative vertex
+typedef enum {SOURCE, TARGET, NEG} vertex_type;//source, target or negative vertex
 typedef double VertexWeit;
 struct VertexMsg{
-    int type; // message type: 1,2,3
-    int64_t source_id; // start vertex of edge
-    int64_t target_id;   // end vertex of edge
+    int type; // message type: 0,1,2,3
+    int64_t source_id; // source vertex of edge
+    int64_t target_id; // target vertex of edge
 
-    /* Type 1 Message: all vertexes send vertex and edge data to root vertex  */
+    /* Type 0 Message: all vertices send vertex and edge data to root vertex  */
     /* ---------------------------------1------------------------------------ */
-    VertexWeit edge_weight; // weight of edge
+    VertexWeit weight;
     /* ---------------------------------------------------------------------- */
 
-    /* Type 2 Message: root vertex send sample edge and vertex data to related
+    /* Type 1 Message: all vertices send it's degree to root vertex  */
+    /* ---------------------------------1------------------------------------ */
+    VertexWeit degree;
+    /* ---------------------------------------------------------------------- */
+
+    /* Type 2 Message: root sends sample edge and vertex data to related
      * vertexes */
     /* ---------------------------------2------------------------------------ */
     int order; // order of proximity
@@ -51,8 +68,8 @@ struct VertexMsg{
 
 };
 struct VertexVal{
-    real emb_vertex[VERTEX_DIM];
-    real emb_context[VERTEX_DIM];
+    real *emb_vertex;
+    real *emb_context;
 };
 
 
@@ -106,7 +123,7 @@ public:
         // Note: modify this if an edge weight is to be read
         //       modify the 'weight' variable
 
-        sscanf(line, "%lld %lld %d", &from, &to, &weight);
+        sscanf(line, "%lld %lld %lf", &from, &to, &weight);
         addEdge(from, to, &weight);
 
         last_vertex = from;
@@ -117,7 +134,7 @@ public:
             // Note: modify this if an edge weight is to be read
             //       modify the 'weight' variable
 
-            sscanf(line, "%lld %lld %d", &from, &to, &weight);
+            sscanf(line, "%lld %lld %lf", &from, &to, &weight);
             if (last_vertex != from) {
                 addVertex(last_vertex, &value, outdegree);
                 last_vertex = from;
@@ -183,10 +200,6 @@ public:
 class VERTEX_CLASS_NAME(): public Vertex <VertexVal, VertexWeit, VertexMsg> {
 private:
     /* Parameters in ROOT */
-    const int hash_table_size = 30000000;
-    const int neg_table_size = 1e8;
-    const int sigmoid_table_size = 1000;
-
     long long num_edges;
     real init_rho = 0.025, rho;
     unsigned long long seed = 1;
@@ -195,9 +208,10 @@ private:
     long long *alias;
     double *prob;
 
-    std::vector<VertexWeit> *edge_weight;
+    int num_vertices;
+    std::vector<VertexWeit> *edge_weight, *vertex_degree;
     std::vector<int64_t> *edge_source_id, *edge_target_id;
-    int64_t *vertex_hash_table, *neg_table;
+    int *neg_table;
     real *sigmoid_table;
 
 public:
@@ -209,28 +223,37 @@ public:
             // all vertices send edge information to root vertex
             OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
             VertexMsg msg;
-            msg.type = 1;
+            VertexWeit degree = 0;
+            msg.type = 0;
             msg.source_vid = vid;
             for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {
                 msg.target_vid = outEdgeIterator.target();
-                msg.edge_weight = outEdgeIterator.getValue();      
+                msg.weight = outEdgeIterator.getValue();
+                degree += msg.weight;    
                 sendMessageTo(ROOT, msg);
             }
+            msg.degree = degree;
+            sendMessageTo(ROOT, msg);
         } else if (getSuperstep() == 1){
             if(vid == ROOT){
-                // root vertex initialize sample tables in superStep 1
                 num_edges = 0;
+                num_vertices = 0;
                 edge_source_id = new std::vector<int64_t>();
                 edge_target_id = new std::vector<int64_t>();
                 edge_weight = new std::vector<VertexWeit>();
+                vertex_degree = new std::vector<VertexWeit>();
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
-                    VertexMsg msg = pmsgs->getValue();
-                    if (msg.type == 1){
+                    VertexMess msg = pmsgs->getValue();
+                    if (msg.type == 0){
                         num_edges += 1;
                         edge_source_id->push_back(msg.source_id);
                         edge_target_id->push_back(msg.target_id);
-                        edge_weight->push_back(msg.edge_weight);
+                        edge_weight->push_back(msg.weight);
+                    }
+                    if (msg.type == 1) {
+                        num_vertices += 1;
+                        vertex_degree->push_back(msg.degree);
                     }
                 }
 
@@ -367,34 +390,52 @@ public:
     	free(small_block);
     	free(large_block);
     }
+    
     long long SampleAnEdge(double rand_value1, double rand_value2) {
         long long k = (long long)num_edges * rand_value1;
         return rand_value2 < prob[k] ? k : alias[k];
     }
 
-    void InitNegTable();
+    /* Sample negative vertex samples according to vertex degrees */
+    void InitNegTable()
+    {
+        double sum = 0, cur_sum = 0, por = 0;
+        int vid = 0;
+        neg_table = (int *)malloc(NEG_TABLE_SIZE * sizeof(int));
+        for (int k = 0; k != num_vertices; k++) sum += pow(vertex_degree, NEG_SAMPLING_POWER);
+        for (int k = 0; k != NEG_TABLE_SIZE; k++)
+        {
+            if ((double)(k + 1) / NEG_TABLE_SIZE > por)
+            {
+                cur_sum += pow(vertex[vid].degree, NEG_SAMPLING_POWER);
+                por = cur_sum / sum;
+                vid++;
+            }
+            neg_table[k] = vid - 1;
+        }
+    }
 
     /* Fastly compute sigmoid function */
     void InitSigmoidTable(){
         real x;
-        sigmoid_table = (real *)malloc((sigmoid_table_size + 1) * sizeof(real));
-        for (int k = 0; k != sigmoid_table_size; k++)
+        sigmoid_table = (real *)malloc((SIGMOID_TABLE_SIZE + 1) * sizeof(real));
+        for (int k = 0; k != SIGMOID_TABLE_SIZE; k++)
         {
-            x = 2.0 * SIGMOID_BOUND * k / sigmoid_table_size - SIGMOID_BOUND;
+            x = 2.0 * SIGMOID_BOUND * k / SIGMOID_TABLE_SIZE - SIGMOID_BOUND;
             sigmoid_table[k] = 1 / (1 + exp(-x));
         }
     }
     real FastSigmoid(real x){
         if (x > SIGMOID_BOUND) return 1;
         else if (x < -SIGMOID_BOUND) return 0;
-        int k = (x + SIGMOID_BOUND) * sigmoid_table_size / SIGMOID_BOUND / 2;
+        int k = (x + SIGMOID_BOUND) * SIGMOID_TABLE_SIZE / SIGMOID_BOUND / 2;
         return sigmoid_table[k];
     }
 
     /* Fastly generate a random integer */
     int Rand(unsigned long long &seed) {
         seed = seed * 25214903917 + 11;
-        return (seed >> 16) % neg_table_size;
+        return (seed >> 16) % NEG_TABLE_SIZE;
     }
 };
 
