@@ -1,10 +1,9 @@
-/* 1, 2018E8013261005, Zhang Yunfei */
-
 #include <stdio.h>
 #include <string.h>
 #include <vector>
 #include <math.h>
 #include <map>
+#include <gsl/gsl_rng.h>
 
 #include "GraphLite.h"
 
@@ -15,6 +14,13 @@
 #define NEG_NUM 10
 #define VERTEX_DIM 200
 #define ROOT 1
+
+#define MAX_STRING 100
+#define SIGMOID_BOUND 6
+#define NEG_SAMPLING_POWER 0.75
+
+int order = 1; //input parameter order
+int parallel_num = 1;
 
 typedef float real;
 typedef enum {START, END, NEG} vertex_type;//start,end,negative vertex
@@ -32,7 +38,7 @@ struct VertexMsg{
     /* Type 2 Message: root vertex send sample edge and vertex data to related
      * vertexes */
     /* ---------------------------------2------------------------------------ */
-    vertex_type v_type; //start,end,negative vertex
+    int order; // order of proximity
     int64_t neg_vid[NEG_NUM]; // negative sample vertexes array
     /* ---------------------------------------------------------------------- */
 
@@ -45,8 +51,8 @@ struct VertexMsg{
 
 };
 struct VertexVal{
-    real *emb_vertex;
-    real *emb_context;
+    real emb_vertex[VERTEX_DIM];
+    real emb_context[VERTEX_DIM];
 };
 
 
@@ -176,10 +182,14 @@ public:
 
 class VERTEX_CLASS_NAME(): public Vertex <VertexVal, VertexWeit, VertexMsg> {
 private:
-    int k; //input parameter K
-
     /* Parameters in ROOT */
+    const int hash_table_size = 30000000;
+    const int neg_table_size = 1e8;
+    const int sigmoid_table_size = 1000;
+
     long long num_edges;
+    real init_rho = 0.025, rho;
+    unsigned long long seed = 1;
 
     // Parameters for edge sampling
     long long *alias;
@@ -188,6 +198,7 @@ private:
     std::vector<VertexWeit> *edge_weight;
     std::vector<int64_t> *edge_source_id, *edge_target_id;
     int64_t *vertex_hash_table, *neg_table;
+    real *sigmoid_table;
 
 public:
     void compute(MessageIterator* pmsgs) {
@@ -206,15 +217,15 @@ public:
                 sendMessageTo(ROOT, msg);
             }
         } else if (getSuperstep() == 1){
-            // root vertex initialize sample tables in superStep 1
             if(vid == ROOT){
+                // root vertex initialize sample tables in superStep 1
                 num_edges = 0;
                 edge_source_id = new std::vector<int64_t>();
                 edge_target_id = new std::vector<int64_t>();
                 edge_weight = new std::vector<VertexWeit>();
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
-                    VertexMess msg = pmsgs->getValue();
+                    VertexMsg msg = pmsgs->getValue();
                     if (msg.type == 1){
                         num_edges += 1;
                         edge_source_id->push_back(msg.source_id);
@@ -224,28 +235,88 @@ public:
                 }
 
                 InitAliasTable();
-            } else {
+                InitNegTable();
+                InitSigmoidTable();
 
+                gsl_rng_env_setup();
+                gsl_T = gsl_rng_rand48;
+                gsl_r = gsl_rng_alloc(gsl_T);
+                gsl_rng_set(gsl_r, 314159265);
+
+                // root vertex samples and sends message
+                for (int i = 0; i < parallel_num; ++i) {
+                    SampleAndSendMsg();
+                }
+
+            } else {
+                // all vertexes initialize vectors superStep 1
+                // TODO
             }
         } else {
             //root vertex sample and send result to related vertex;
             if(vid == ROOT){
-
+                // root vertex samples and sends message
+                for (int i = 0; i < parallel_num; ++i) {
+                    SampleAndSendMsg();
+                }
             }
 
-            if(getSuperstep() != 1 || vid != ROOT){
-                // process message
-                for ( ; ! pmsgs->done(); pmsgs->next() ) {
-                    VertexMess msg = pmsgs->getValue();
-                    if (msg.type == 2){
-
-                    } else if (msg.type == 3){
-
+            // process message
+            for ( ; ! pmsgs->done(); pmsgs->next() ) {
+                VertexMsg msg = pmsgs->getValue();
+                if (msg.type == 2){
+                    /* this is a source vertex and need to send it vector to target and neg vertexes */
+                    VertexVal val = getValue();
+                    VertexMsg message;
+                    message.type = 3;
+                    message.source_id = vid;
+                    message.source_vertex_type = START;
+                    for (int i = 0; i < VERTEX_DIM; ++i) {
+                        message.vec_v[i] = val.emb_vertex[i];
+                    }
+                    message.target_id = msg.target_id;
+                    message.target_vertex_type = END;
+                    // send message to end vertex of the edge
+                    sendMessageTo(msg.target_id, message);
+                    // send message to negative vertexes of the edge
+                    for (int j = 0; j < NEG_NUM; ++j) {
+                        message.target_id = msg.neg_vid[j];
+                        message.target_vertex_type = NEG;
+                        sendMessageTo(msg.neg_vid[j], message);
+                    }
+                } else if (msg.type == 3){
+                    if(msg.target_vertex_type == START){
+                        // update source vertex
+                        // TODO
+                    } else if(msg.target_vertex_type == END){
+                        // update target vertex
+                        // TODO
+                    } else if(msg.target_vertex_type == NEG){
+                        // update negative vertex
+                        // TODO
                     }
                 }
             }
         }
     }
+    /* root vertex samples and sends message to vertex*/
+    void SampleAndSendMsg(){
+        int64_t u, v;
+        curedge = SampleAnEdge(gsl_rng_uniform(gsl_r), gsl_rng_uniform(gsl_r));
+        u = edge_source_id->at(curedge);
+        v = edge_target_id->at(curedge);
+        VertexMsg msg;
+        msg.type = 2;
+        msg.source_vid = u;
+        msg.target_id = v;
+        msg.order = order;
+        // NEGATIVE SAMPLING
+        for (int d = 0; d < NEG_NUM; d++) {
+            msg.neg_vid[d] = neg_table[Rand(seed)];
+        }
+        sendMessageTo(u, msg);
+    }
+
 	/* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
     void InitAliasTable() {
     	alias = (long long *)malloc(num_edges*sizeof(long long));
@@ -295,6 +366,35 @@ public:
     	free(norm_prob);
     	free(small_block);
     	free(large_block);
+    }
+    long long SampleAnEdge(double rand_value1, double rand_value2) {
+        long long k = (long long)num_edges * rand_value1;
+        return rand_value2 < prob[k] ? k : alias[k];
+    }
+
+    void InitNegTable();
+
+    /* Fastly compute sigmoid function */
+    void InitSigmoidTable(){
+        real x;
+        sigmoid_table = (real *)malloc((sigmoid_table_size + 1) * sizeof(real));
+        for (int k = 0; k != sigmoid_table_size; k++)
+        {
+            x = 2.0 * SIGMOID_BOUND * k / sigmoid_table_size - SIGMOID_BOUND;
+            sigmoid_table[k] = 1 / (1 + exp(-x));
+        }
+    }
+    real FastSigmoid(real x){
+        if (x > SIGMOID_BOUND) return 1;
+        else if (x < -SIGMOID_BOUND) return 0;
+        int k = (x + SIGMOID_BOUND) * sigmoid_table_size / SIGMOID_BOUND / 2;
+        return sigmoid_table[k];
+    }
+
+    /* Fastly generate a random integer */
+    int Rand(unsigned long long &seed) {
+        seed = seed * 25214903917 + 11;
+        return (seed >> 16) % neg_table_size;
     }
 };
 
