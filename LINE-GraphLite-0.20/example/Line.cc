@@ -244,7 +244,7 @@ public:
                 vertex_degree = new std::vector<VertexWeit>();
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
-                    VertexMess msg = pmsgs->getValue();
+                    VertexMsg msg = pmsgs->getValue();
                     if (msg.type == 0){
                         num_edges += 1;
                         edge_source_id->push_back(msg.source_id);
@@ -360,7 +360,6 @@ public:
     	long long cur_small_block, cur_large_block;
     	long long num_small_block = 0, num_large_block = 0;
 
-    	/* need edge_weight[] */
     	for (long long k = 0; k != num_edges; k++) sum += edge_weight[k];
     	for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight[k] * num_edges / sum;
 
@@ -402,12 +401,12 @@ public:
         double sum = 0, cur_sum = 0, por = 0;
         int vid = 0;
         neg_table = (int *)malloc(NEG_TABLE_SIZE * sizeof(int));
-        for (int k = 0; k != num_vertices; k++) sum += pow(vertex_degree, NEG_SAMPLING_POWER);
+        for (int k = 0; k != num_vertices; k++) sum += pow(vertex_degree.at(k), NEG_SAMPLING_POWER);
         for (int k = 0; k != NEG_TABLE_SIZE; k++)
         {
             if ((double)(k + 1) / NEG_TABLE_SIZE > por)
             {
-                cur_sum += pow(vertex[vid].degree, NEG_SAMPLING_POWER);
+                cur_sum += pow(vertex_degree.at(vid), NEG_SAMPLING_POWER);
                 por = cur_sum / sum;
                 vid++;
             }
