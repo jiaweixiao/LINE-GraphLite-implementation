@@ -35,12 +35,13 @@ int order = 1; //input parameter order
 int parallel_num = 1;
 
 typedef float real;
-typedef enum {SOURCE, TARGET, NEG} vertex_type;//source, target or negative vertex
+typedef enum {START, END, NEG} vertex_type;//start, end or negative vertex
 typedef double VertexWeit;
 struct VertexMsg{
     int type; // message type: 0,1,2,3
     int64_t source_id; // source vertex of edge
     int64_t target_id; // target vertex of edge
+    real rho;
 
     /* Type 0 Message: all vertices send vertex and edge data to root vertex  */
     /* ---------------------------------1------------------------------------ */
@@ -63,6 +64,7 @@ struct VertexMsg{
     /* ---------------------------------3------------------------------------ */
     vertex_type source_vertex_type; // type of vertex which sends message
     vertex_type target_vertex_type; // type of vertex which receives message
+
     real vec_v[VERTEX_DIM];
     /* ---------------------------------------------------------------------- */
 
@@ -288,6 +290,7 @@ public:
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
                 VertexMsg msg = pmsgs->getValue();
                 if (msg.type == 2){
+                    // TODO rho
                     /* this is a source vertex and need to send it vector to target and neg vertexes */
                     VertexVal val = getValue();
                     VertexMsg message;
@@ -308,15 +311,44 @@ public:
                         sendMessageTo(msg.neg_vid[j], message);
                     }
                 } else if (msg.type == 3){
+                    real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
-                        // update source vertex
+                        // update start vertex
                         // TODO
                     } else if(msg.target_vertex_type == END){
-                        // update target vertex
-                        // TODO
+                        // update end vertex
+                        VertexVal val = getValue();
+                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 1, msg.rho);
+                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 1, msg.rho);
+
+                        VertexMsg message;
+                        message.type = 3;
+                        message.source_id = vid;
+                        message.source_vertex_type = END;
+                        for (int i = 0; i < VERTEX_DIM; ++i) {
+                            message.vec_v[i] = vec_error[i];
+                        }
+                        message.target_id = msg.source_id;
+                        message.target_vertex_type = START;
+                        // send message to start vertex of the edge
+                        sendMessageTo(msg.source_id, message);
+
                     } else if(msg.target_vertex_type == NEG){
                         // update negative vertex
-                        // TODO
+                        VertexVal val = getValue();
+                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 0, msg.rho);
+                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 0, msg.rho);
+                        VertexMsg message;
+                        message.type = 3;
+                        message.source_id = vid;
+                        message.source_vertex_type = NEG;
+                        for (int i = 0; i < VERTEX_DIM; ++i) {
+                            message.vec_v[i] = vec_error[i];
+                        }
+                        message.target_id = msg.source_id;
+                        message.target_vertex_type = START;
+                        // send message to start vertex of the edge
+                        sendMessageTo(msg.source_id, message);
                     }
                 }
             }
@@ -429,6 +461,15 @@ public:
         else if (x < -SIGMOID_BOUND) return 0;
         int k = (x + SIGMOID_BOUND) * SIGMOID_TABLE_SIZE / SIGMOID_BOUND / 2;
         return sigmoid_table[k];
+    }
+
+    /* Update embeddings */
+    void Update(real *vec_u, real *vec_v, real *vec_error, int label, real rho){
+        real x = 0, g;
+        for (int c = 0; c != VERTEX_DIM; c++) x += vec_u[c] * vec_v[c];
+        g = (label - FastSigmoid(x)) * rho;
+        for (int c = 0; c != VERTEX_DIM; c++) vec_error[c] += g * vec_v[c];
+        for (int c = 0; c != VERTEX_DIM; c++) vec_v[c] += g * vec_u[c];
     }
 
     /* Fastly generate a random integer */
