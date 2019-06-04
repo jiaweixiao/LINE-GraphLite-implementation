@@ -30,6 +30,8 @@
 
 #define SIGMOID_TABLE_SIZE 1000
 
+#define total_samples 100000
+
 
 int order = 1; //input parameter order
 int parallel_num = 1;
@@ -41,7 +43,7 @@ struct VertexMsg{
     int type; // message type: 0,1,2,3
     int64_t source_id; // source vertex of edge
     int64_t target_id; // target vertex of edge
-    real rho;
+    real rho_m;
 
     /* Type 0 Message: all vertices send vertex and edge data to root vertex  */
     /* ---------------------------------1------------------------------------ */
@@ -204,6 +206,7 @@ private:
     /* Parameters in ROOT */
     long long num_edges;
     real init_rho = 0.025, rho;
+    long long count = 0, last_count = 0, current_sample_count = 0;
     unsigned long long seed = 1;
 
     // Parameters for edge sampling
@@ -280,23 +283,34 @@ public:
         } else {
             //root vertex sample and send result to related vertex;
             if(vid == ROOT){
-                // root vertex samples and sends message
-                for (int i = 0; i < parallel_num; ++i) {
-                    SampleAndSendMsg();
+                //judge for exit
+                if (count < total_samples / parallel_num + 2){
+                    if (count - last_count > 10000) {
+                        current_sample_count += count - last_count;
+                        last_count = count;
+                        printf("%cRho: %f  Progress: %.3lf%%", 13, rho, (real)current_sample_count / (real)(total_samples + 1) * 100);
+                        fflush(stdout);
+                        rho = init_rho * (1 - current_sample_count / (real)(total_samples + 1));
+                        if (rho < init_rho * 0.0001) rho = init_rho * 0.0001;
+                    }
+                    // root vertex samples and sends message
+                    for (int i = 0; i < parallel_num; ++i) {
+                        SampleAndSendMsg();
+                    }
                 }
             }
-
+            
             // process message
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
                 VertexMsg msg = pmsgs->getValue();
                 if (msg.type == 2){
-                    // TODO rho
                     /* this is a source vertex and need to send it vector to target and neg vertexes */
                     VertexVal val = getValue();
                     VertexMsg message;
                     message.type = 3;
                     message.source_id = vid;
                     message.source_vertex_type = START;
+                    message.rho_m = msg.rho_m;
                     for (int i = 0; i < VERTEX_DIM; ++i) {
                         message.vec_v[i] = val.emb_vertex[i];
                     }
@@ -314,12 +328,16 @@ public:
                     real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
                         // update start vertex
-                        // TODO
+                        VertexVal val = getValue();
+                        for (int i = 0; i < VERTEX_DIM; ++i) {
+                            val.emb_vertex[i] += msg.vec_v[i];
+                        }
+
                     } else if(msg.target_vertex_type == END){
                         // update end vertex
                         VertexVal val = getValue();
-                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 1, msg.rho);
-                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 1, msg.rho);
+                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 1, msg.rho_m);
+                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 1, msg.rho_m);
 
                         VertexMsg message;
                         message.type = 3;
@@ -336,8 +354,8 @@ public:
                     } else if(msg.target_vertex_type == NEG){
                         // update negative vertex
                         VertexVal val = getValue();
-                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 0, msg.rho);
-                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 0, msg.rho);
+                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 0, msg.rho_m);
+                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 0, msg.rho_m);
                         VertexMsg message;
                         message.type = 3;
                         message.source_id = vid;
@@ -365,6 +383,7 @@ public:
         msg.source_vid = u;
         msg.target_id = v;
         msg.order = order;
+        msg.rho_m = rho;
         // NEGATIVE SAMPLING
         for (int d = 0; d < NEG_NUM; d++) {
             msg.neg_vid[d] = neg_table[Rand(seed)];
@@ -464,10 +483,10 @@ public:
     }
 
     /* Update embeddings */
-    void Update(real *vec_u, real *vec_v, real *vec_error, int label, real rho){
+    void Update(real *vec_u, real *vec_v, real *vec_error, int label, real rho_m){
         real x = 0, g;
         for (int c = 0; c != VERTEX_DIM; c++) x += vec_u[c] * vec_v[c];
-        g = (label - FastSigmoid(x)) * rho;
+        g = (label - FastSigmoid(x)) * rho_m;
         for (int c = 0; c != VERTEX_DIM; c++) vec_error[c] += g * vec_v[c];
         for (int c = 0; c != VERTEX_DIM; c++) vec_v[c] += g * vec_u[c];
     }
