@@ -270,6 +270,7 @@ public:
                 for (int64_t i = 0; i < num_vertices; ++i) {
                     *(vertex_degree->begin()+vid_map->at(i).first) = vid_map->at(i).second;
                 }
+                vector<int>(pair<int64_t,VertexWeit>).swap(vid_map);
 
 
                 InitAliasTable();
