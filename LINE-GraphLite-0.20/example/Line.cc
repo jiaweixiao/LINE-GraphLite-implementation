@@ -109,16 +109,16 @@ public:
         unsigned long long to;
         VertexWeit weight = 0;
         
-        struct VertexVal value = 0;
-        // init embedding
-        posix_memalign((void **)&(value.emb_vertex), 128, (long long)VERTEX_DIM * sizeof(real));
-        posix_memalign((void **)&(value.emb_context), 128, (long long)VERTEX_DIM * sizeof(real));
-        if (value.emb_vertex == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
-        if (value.emb_context == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
-        for (int b = 0; b < VERTEX_DIM; b++) {
-            emb_vertex[b] = (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
-            emb_context[b] = 0;
-        }
+//        struct VertexVal value = 0;
+//        // init embedding
+//        posix_memalign((void **)&(value.emb_vertex), 128, (long long)VERTEX_DIM * sizeof(real));
+//        posix_memalign((void **)&(value.emb_context), 128, (long long)VERTEX_DIM * sizeof(real));
+//        if (value.emb_vertex == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
+//        if (value.emb_context == NULL) { printf("Error: memory allocation failed\n"); exit(1); }
+//        for (int b = 0; b < VERTEX_DIM; b++) {
+//            emb_vertex[b] = (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+//            emb_context[b] = 0;
+//        }
 
         int outdegree = 0;
         
@@ -289,7 +289,15 @@ public:
 
             } else {
                 // all vertexes initialize vectors superStep 1
-                // TODO
+                VertexVal val = getValue();
+                val.emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
+                val.emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
+                for (int i = 0; i < VERTEX_DIM; ++i) {
+                    val.emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+                }
+                for (int i = 0; i < VERTEX_DIM; ++i) {
+                    val.emb_context[i] = 0;
+                }
             }
         } else {
             //root vertex sample and send result to related vertex;
