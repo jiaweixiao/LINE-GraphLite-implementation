@@ -156,13 +156,19 @@ class VERTEX_CLASS_NAME(OutputFormatter): public OutputFormatter {
 public:
     void writeResult() {
         int64_t vid;
-        int current_degree;
         char s[1024];
+        VertexVal val;
 
         for (ResultIterator r_iter; ! r_iter.done(); r_iter.next() ) {
-            r_iter.getIdValue(vid, &current_degree);
-            if (current_degree > 0){
-                int n = sprintf(s, "%lld\n", (unsigned long long)vid);
+            r_iter.getIdValue(vid, val);
+            int n = sprintf(s, "%lld ", (int64_t)vid);
+            writeNextResLine(s, n);
+            for (int i = 0; i < VERTEX_DIM; ++i) {
+                if(i < VERTEX_DIM-1){
+                    n = sprintf(s, "%f ", val.emb_vertex[i]);
+                }else{
+                    n = sprintf(s, "%f\n", val.emb_vertex[i]);
+                }
                 writeNextResLine(s, n);
             }
         }
@@ -466,8 +472,7 @@ public:
     }
 
     /* Sample negative vertex samples according to vertex degrees */
-    void InitNegTable()
-    {
+    void InitNegTable() {
         double sum = 0, cur_sum = 0, por = 0;
         int vid = 0;
         neg_table = (int *)malloc(NEG_TABLE_SIZE * sizeof(int));
@@ -525,7 +530,6 @@ public:
     // argv[0]: PageRankVertex.so
     // argv[1]: <input path>
     // argv[2]: <output path>
-    // argv[3]: k
     void init(int argc, char* argv[]) {
 
         setNumHosts(5);
@@ -546,9 +550,6 @@ public:
         aggregator = new VERTEX_CLASS_NAME(Aggregator)[1];
         regNumAggr(1);
         regAggr(0, &aggregator[0]);
-        int k_val = atoi(argv[3]);
-        aggregator->setKValue(k_val);
-        printf("K value: %d\n", k_val);
     }
 
     void term() {
