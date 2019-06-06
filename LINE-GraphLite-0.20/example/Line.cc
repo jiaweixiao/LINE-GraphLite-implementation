@@ -216,6 +216,7 @@ private:
     int num_vertices;
     std::vector<VertexWeit> *edge_weight, *vertex_degree;
     std::vector<int64_t> *edge_source_id, *edge_target_id;
+    std::vector<pair<int64_t,VertexWeit>> *vid_map; //vid:degree
     int *neg_table;
     real *sigmoid_table;
 
@@ -237,16 +238,18 @@ public:
                 degree += msg.weight;    
                 sendMessageTo(ROOT, msg);
             }
+            msg.type = 1;
             msg.degree = degree;
             sendMessageTo(ROOT, msg);
         } else if (getSuperstep() == 1){
+            // root receives messages and initiates
             if(vid == ROOT){
                 num_edges = 0;
                 num_vertices = 0;
                 edge_source_id = new std::vector<int64_t>();
                 edge_target_id = new std::vector<int64_t>();
                 edge_weight = new std::vector<VertexWeit>();
-                vertex_degree = new std::vector<VertexWeit>();
+                vid_map = new std::vector<pair<int64_t,VertexWeit>>();
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
                     VertexMsg msg = pmsgs->getValue();
@@ -258,9 +261,16 @@ public:
                     }
                     if (msg.type == 1) {
                         num_vertices += 1;
-                        vertex_degree->push_back(msg.degree);
+                        vid_map->push_back(pair<int64_t,VertexWeit>(msg.source_id,msg.degree));
                     }
                 }
+                num_vertices = vid_map->size();
+                // let index of vertex_degree is same to its vid
+                vertex_degree = new std::vector<VertexWeit>(num_vertices);
+                for (int64_t i = 0; i < num_vertices; ++i) {
+                    *(vertex_degree->begin()+vid_map->at(i).first) = vid_map->at(i).second;
+                }
+
 
                 InitAliasTable();
                 InitNegTable();
@@ -299,7 +309,7 @@ public:
                     }
                 }
             }
-            
+
             // process message
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
                 VertexMsg msg = pmsgs->getValue();
