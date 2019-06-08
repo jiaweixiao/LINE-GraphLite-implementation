@@ -211,9 +211,11 @@ class VERTEX_CLASS_NAME(): public Vertex <VertexVal, VertexWeit, VertexMsg> {
 private:
     /* Parameters in ROOT */
     long long num_edges;
-    real init_rho = 0.025, rho;
+    real init_rho = 0.025, rho = 0.025;
     long long count = 0, last_count = 0, current_sample_count = 0;
     unsigned long long seed = 1;
+    const gsl_rng_type * gsl_T;
+    gsl_rng * gsl_r;
 
     // Parameters for edge sampling
     long long *alias;
@@ -222,7 +224,7 @@ private:
     int num_vertices;
     std::vector<VertexWeit> *edge_weight, *vertex_degree;
     std::vector<int64_t> *edge_source_id, *edge_target_id;
-    std::vector<pair<int64_t,VertexWeit>> *vid_map; //vid:degree
+    std::vector<pair<int64_t,VertexWeit>> *vid_map; //{(vid,degree)}
     int *neg_table;
     real *sigmoid_table;
 
@@ -248,7 +250,7 @@ public:
             msg.degree = degree;
             sendMessageTo(ROOT, msg);
         } else if (getSuperstep() == 1){
-            // root receives messages and initiates
+            // root receives messages and does some initialization
             if(vid == ROOT){
                 num_edges = 0;
                 num_vertices = 0;
@@ -259,23 +261,23 @@ public:
                 // process message
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
                     VertexMsg msg = pmsgs->getValue();
-                    if (msg.type == 0){
+                    if (msg.type == 0) {
                         num_edges += 1;
                         edge_source_id->push_back(msg.source_id);
                         edge_target_id->push_back(msg.target_id);
                         edge_weight->push_back(msg.weight);
                     }
                     if (msg.type == 1) {
-                        num_vertices += 1;
                         vid_map->push_back(pair<int64_t,VertexWeit>(msg.source_id,msg.degree));
                     }
                 }
                 num_vertices = vid_map->size();
-                // let index of vertex_degree is same to its vid
+                // set vid as the index of vertex_degree
                 vertex_degree = new std::vector<VertexWeit>(num_vertices);
                 for (int64_t i = 0; i < num_vertices; ++i) {
-                    *(vertex_degree->begin()+vid_map->at(i).first) = vid_map->at(i).second;
+                    vertex_degree->at(vid_map->at(i).first) = vid_map->at(i).second;
                 }
+                // free
                 vector<int>(pair<int64_t,VertexWeit>).swap(vid_map);
 
 
@@ -306,7 +308,8 @@ public:
                 }
             }
         } else {
-            //root vertex sample and send result to related vertex;
+            // superstep >= 2
+
             if(vid == ROOT){
                 //judge for exit
                 if (count < total_samples / parallel_num + 2){
@@ -329,16 +332,14 @@ public:
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
                 VertexMsg msg = pmsgs->getValue();
                 if (msg.type == 2){
-                    /* this is a source vertex and need to send it vector to target and neg vertexes */
+                    // this is a source vertex and need to send it vector to target and neg vertexes
                     VertexVal val = getValue();
                     VertexMsg message;
                     message.type = 3;
                     message.source_id = vid;
                     message.source_vertex_type = START;
                     message.rho_m = msg.rho_m;
-                    for (int i = 0; i < VERTEX_DIM; ++i) {
-                        message.vec_v[i] = val.emb_vertex[i];
-                    }
+                    message.vec_v = val.emb_vertex;
                     message.target_id = msg.target_id;
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
@@ -368,9 +369,7 @@ public:
                         message.type = 3;
                         message.source_id = vid;
                         message.source_vertex_type = END;
-                        for (int i = 0; i < VERTEX_DIM; ++i) {
-                            message.vec_v[i] = vec_error[i];
-                        }
+                        message.vec_v = vec_error;
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
@@ -385,9 +384,7 @@ public:
                         message.type = 3;
                         message.source_id = vid;
                         message.source_vertex_type = NEG;
-                        for (int i = 0; i < VERTEX_DIM; ++i) {
-                            message.vec_v[i] = vec_error[i];
-                        }
+                        message.vec_v = vec_error;
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
