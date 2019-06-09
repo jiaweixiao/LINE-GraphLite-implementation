@@ -43,9 +43,9 @@ for(my $i = $file1_num + 1; $i <= $num_part; ++$i) {
 
 open IN, "$source_file" or die "can't open $source_file!\n";
 while (<IN>) { # $_
-    if (/(\d+) (\d+).*/) {
+    if (/(\d+) (\d+) ([0-9]*\.?[0-9]+).*/) {
         $file_index = $1 % $num_part + 1;
-        print {$output_file[$file_index]} "$1 $2\n";
+        print {$output_file[$file_index]} "$1 $2 $3\n";
     }
 }
 close IN;
