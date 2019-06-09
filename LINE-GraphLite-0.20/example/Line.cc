@@ -28,7 +28,7 @@
 
 #define SIGMOID_TABLE_SIZE 1000
 
-#define total_samples 100
+#define TOTAL_SAMPLES 10000
 #define ORDER 1 //input parameter order
 #define PARALLEL_NUM 1
 
@@ -226,7 +226,10 @@ private:
 
 public:
     void compute(MessageIterator* pmsgs) {
-
+        if (* (int *)getAggrGlobal(0) > 0 ) {
+            voteToHalt();
+            return ;
+        }
         int64_t vid = getVertexId();
 
         if (getSuperstep() == 0) {
@@ -315,19 +318,25 @@ public:
                 //judge for exit
                 std::cout << vid << ": " 
                     << "judge for exit\n"; fflush(stdout);
-                if (count < total_samples / PARALLEL_NUM + 2){
+                if (count < TOTAL_SAMPLES / PARALLEL_NUM + 2){
                     if (count - last_count > 10000) {
                         current_sample_count += count - last_count;
                         last_count = count;
-                        printf("%cRho: %f  Progress: %.3lf%%", 13, rho, (real)current_sample_count / (real)(total_samples + 1) * 100);
+                        printf("%cRho: %f  Progress: %.3lf%%", 13, rho, (real)current_sample_count / (real)(TOTAL_SAMPLES + 1) * 100);
                         fflush(stdout);
-                        rho = init_rho * (1 - current_sample_count / (real)(total_samples + 1));
+                        rho = init_rho * (1 - current_sample_count / (real)(TOTAL_SAMPLES + 1));
                         if (rho < init_rho * 0.0001) rho = init_rho * 0.0001;
                     }
                     // root vertex samples and sends message
                     for (int i = 0; i < PARALLEL_NUM; ++i) {
                         SampleAndSendMsg();
                     }
+                    count++;
+                } else {
+                    int one = 1;
+                    accumulateAggr(0, &one);
+                    std::cout << vid << ": " 
+                        << "count "<< count<<"\n"; fflush(stdout);
                 }
             }
 
