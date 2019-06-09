@@ -109,7 +109,7 @@ public:
         unsigned long long to;
         VertexWeit weight = 0;
         
-//        struct VertexVal value = 0;
+        VertexVal value;
 //        // init embedding
 //        posix_memalign((void **)&(value.emb_vertex), 128, (long long)VERTEX_DIM * sizeof(real));
 //        posix_memalign((void **)&(value.emb_context), 128, (long long)VERTEX_DIM * sizeof(real));
@@ -160,7 +160,7 @@ public:
         VertexVal val;
 
         for (ResultIterator r_iter; ! r_iter.done(); r_iter.next() ) {
-            r_iter.getIdValue(vid, val);
+            r_iter.getIdValue(vid, &val);
             int n = sprintf(s, "%lld ", (int64_t)vid);
             writeNextResLine(s, n);
             for (int i = 0; i < VERTEX_DIM; ++i) {
@@ -235,13 +235,13 @@ public:
 
         if (getSuperstep() == 0) {
             // all vertices send edge information to root vertex
-            OutEdgeIterator outEdgeIterator = getOutEdgeIterator()
+            OutEdgeIterator outEdgeIterator = getOutEdgeIterator();
             VertexMsg msg;
             VertexWeit degree = 0;
             msg.type = 0;
-            msg.source_vid = vid;
+            msg.source_id = vid;
             for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {
-                msg.target_vid = outEdgeIterator.target();
+                msg.target_id = outEdgeIterator.target();
                 msg.weight = outEdgeIterator.getValue();
                 degree += msg.weight;    
                 sendMessageTo(ROOT, msg);
@@ -278,8 +278,7 @@ public:
                     vertex_degree->at(vid_map->at(i).first) = vid_map->at(i).second;
                 }
                 // free
-                vector<int>(pair<int64_t,VertexWeit>).swap(vid_map);
-
+                std::vector<pair<int64_t,VertexWeit>>().swap(*vid_map);
 
                 InitAliasTable();
                 InitNegTable();
@@ -339,7 +338,9 @@ public:
                     message.source_id = vid;
                     message.source_vertex_type = START;
                     message.rho_m = msg.rho_m;
-                    message.vec_v = val.emb_vertex;
+                    for (int i = 0; i < VERTEX_DIM; ++i) {
+                            message.vec_v[i] = val.emb_vertex[i];
+                        }
                     message.target_id = msg.target_id;
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
@@ -369,7 +370,9 @@ public:
                         message.type = 3;
                         message.source_id = vid;
                         message.source_vertex_type = END;
-                        message.vec_v = vec_error;
+                        for (int i = 0; i < VERTEX_DIM; ++i) {
+                            message.vec_v[i] = vec_error[i];
+                        }
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
@@ -384,7 +387,9 @@ public:
                         message.type = 3;
                         message.source_id = vid;
                         message.source_vertex_type = NEG;
-                        message.vec_v = vec_error;
+                        for (int i = 0; i < VERTEX_DIM; ++i) {
+                            message.vec_v[i] = vec_error[i];
+                        }
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
@@ -397,12 +402,12 @@ public:
     /* root vertex samples and sends message to vertex*/
     void SampleAndSendMsg(){
         int64_t u, v;
-        curedge = SampleAnEdge(gsl_rng_uniform(gsl_r), gsl_rng_uniform(gsl_r));
+        long long curedge = SampleAnEdge(gsl_rng_uniform(gsl_r), gsl_rng_uniform(gsl_r));
         u = edge_source_id->at(curedge);
         v = edge_target_id->at(curedge);
         VertexMsg msg;
         msg.type = 2;
-        msg.source_vid = u;
+        msg.source_id = u;
         msg.target_id = v;
         msg.order = order;
         msg.rho_m = rho;
@@ -413,54 +418,54 @@ public:
         sendMessageTo(u, msg);
     }
 
-	/* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
+    /* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
     void InitAliasTable() {
-    	alias = (long long *)malloc(num_edges*sizeof(long long));
-    	prob = (double *)malloc(num_edges*sizeof(double));
-    	if (alias == NULL || prob == NULL) {
-    		printf("Error: memory allocation failed!\n");
-    		exit(1);
-    	}
-    	double *norm_prob = (double *)malloc(num_edges*sizeof(double));
-    	long long *large_block = (long long *)malloc(num_edges*sizeof(long long));
-    	long long *small_block = (long long *)malloc(num_edges*sizeof(long long));
-    	if (norm_prob == NULL || large_block == NULL || small_block == NULL) {
-    		printf("Error: memory allocatiion failed!\n");
-    		exit(1);
-    	}
+        alias = (long long *)malloc(num_edges*sizeof(long long));
+        prob = (double *)malloc(num_edges*sizeof(double));
+        if (alias == NULL || prob == NULL) {
+            printf("Error: memory allocation failed!\n");
+            exit(1);
+        }
+        double *norm_prob = (double *)malloc(num_edges*sizeof(double));
+        long long *large_block = (long long *)malloc(num_edges*sizeof(long long));
+        long long *small_block = (long long *)malloc(num_edges*sizeof(long long));
+        if (norm_prob == NULL || large_block == NULL || small_block == NULL) {
+            printf("Error: memory allocatiion failed!\n");
+            exit(1);
+        }
 
-    	double sum = 0;
-    	long long cur_small_block, cur_large_block;
-    	long long num_small_block = 0, num_large_block = 0;
+        double sum = 0;
+        long long cur_small_block, cur_large_block;
+        long long num_small_block = 0, num_large_block = 0;
 
-    	for (long long k = 0; k != num_edges; k++) sum += edge_weight[k];
-    	for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight[k] * num_edges / sum;
+        for (long long k = 0; k != num_edges; k++) sum += edge_weight->at(k);
+        for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight->at(k) * num_edges / sum;
 
-    	for (long long k = num_edges - 1; k >= 0; k--) {
-    		if (norm_prob[k] < 1)
-    			small_block[num_small_block++] = k;
-    		else
-    			large_block[num_large_block++] = k;
-    	}
+        for (long long k = num_edges - 1; k >= 0; k--) {
+            if (norm_prob[k] < 1)
+                small_block[num_small_block++] = k;
+            else
+                large_block[num_large_block++] = k;
+        }
 
-    	while (num_small_block && num_large_block) {
-    		cur_small_block = small_block[--num_small_block];
-    		cur_large_block = large_block[--num_large_block];
-    		prob[cur_small_block] = norm_prob[cur_small_block];
-    		alias[cur_small_block] = cur_large_block;
-    		norm_prob[cur_large_block] = norm_prob[cur_large_block] + norm_prob[cur_small_block] - 1;
-    		if (norm_prob[cur_large_block] < 1)
-    			small_block[num_small_block++] = cur_large_block;
-    		else
-    			large_block[num_large_block++] = cur_large_block;
-    	}
+        while (num_small_block && num_large_block) {
+            cur_small_block = small_block[--num_small_block];
+            cur_large_block = large_block[--num_large_block];
+            prob[cur_small_block] = norm_prob[cur_small_block];
+            alias[cur_small_block] = cur_large_block;
+            norm_prob[cur_large_block] = norm_prob[cur_large_block] + norm_prob[cur_small_block] - 1;
+            if (norm_prob[cur_large_block] < 1)
+                small_block[num_small_block++] = cur_large_block;
+            else
+                large_block[num_large_block++] = cur_large_block;
+        }
 
-    	while (num_large_block) prob[large_block[--num_large_block]] = 1;
-    	while (num_small_block) prob[small_block[--num_small_block]] = 1;
+        while (num_large_block) prob[large_block[--num_large_block]] = 1;
+        while (num_small_block) prob[small_block[--num_small_block]] = 1;
 
-    	free(norm_prob);
-    	free(small_block);
-    	free(large_block);
+        free(norm_prob);
+        free(small_block);
+        free(large_block);
     }
     
     long long SampleAnEdge(double rand_value1, double rand_value2) {
@@ -473,12 +478,12 @@ public:
         double sum = 0, cur_sum = 0, por = 0;
         int vid = 0;
         neg_table = (int *)malloc(NEG_TABLE_SIZE * sizeof(int));
-        for (int k = 0; k != num_vertices; k++) sum += pow(vertex_degree.at(k), NEG_SAMPLING_POWER);
+        for (int k = 0; k != num_vertices; k++) sum += pow(vertex_degree->at(k), NEG_SAMPLING_POWER);
         for (int k = 0; k != NEG_TABLE_SIZE; k++)
         {
             if ((double)(k + 1) / NEG_TABLE_SIZE > por)
             {
-                cur_sum += pow(vertex_degree.at(vid), NEG_SAMPLING_POWER);
+                cur_sum += pow(vertex_degree->at(vid), NEG_SAMPLING_POWER);
                 por = cur_sum / sum;
                 vid++;
             }
@@ -515,7 +520,8 @@ public:
     /* Fastly generate a random integer */
     int Rand(unsigned long long &seed) {
         seed = seed * 25214903917 + 11;
-        return (seed >> 16) % NEG_TABLE_SIZE;
+        int mod = NEG_TABLE_SIZE;
+        return (seed >> 16) % mod;
     }
 };
 
