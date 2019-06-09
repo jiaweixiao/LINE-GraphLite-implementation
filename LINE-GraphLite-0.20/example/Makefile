@@ -4,7 +4,7 @@
 
 CXX= g++
 
-CFLAGS_COMMON=-std=c++0x -g -O2 -I${HADOOP_HOME}/include -I${GRAPHLITE_HOME}/include
+CFLAGS_COMMON=-std=c++0x -g -O2 -lgsl -lm -lgslcblas -I${HADOOP_INCLUDE} -I${GRAPHLITE_HOME}/include
 LIB_GRAPHALGO=-fPIC -shared
 
 # ----------------------------------------------------------------------
@@ -17,18 +17,18 @@ all : example
 # example graph algorithms
 # ----------------------------------------------------------------------
 
-EXAMPLE_ALGOS=PageRankVertex.so
+EXAMPLE_ALGOS=Line.so
 
 example: ${EXAMPLE_ALGOS}
 
 %.so : %.cc
-	${CXX} ${CFLAGS_COMMON} $< ${LIB_GRAPHALGO} -o $@
+        ${CXX} ${CFLAGS_COMMON} $< ${LIB_GRAPHALGO} -o $@
 
-PageRankVertex.so : PageRankVertex.cc
+Line.so : Line.cc
 
 # ----------------------------------------------------------------------
 # clean up
 # ----------------------------------------------------------------------
 
 clean :
-	rm -rf *.so
+        rm -rf *.so
