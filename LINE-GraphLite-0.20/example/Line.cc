@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <iostream>
 #include <vector>
 #include <math.h>
 #include <map>
@@ -56,13 +57,13 @@ struct VertexMsg{
     /* ---------------------------------------------------------------------- */
 
     /* Type 2 Message: root sends sample edge and vertex data to related
-     * vertexes */
+     * vertices */
     /* ---------------------------------2------------------------------------ */
     int order; // order of proximity
-    int64_t neg_vid[NEG_NUM]; // negative sample vertexes array
+    int64_t neg_vid[NEG_NUM]; // negative sample vertex array
     /* ---------------------------------------------------------------------- */
 
-    /* Type 3 Message: vertex send vector of vertex to related vertexes */
+    /* Type 3 Message: vertex send vector of vertex to related vertices */
     /* ---------------------------------3------------------------------------ */
     vertex_type source_vertex_type; // type of vertex which sends message
     vertex_type target_vertex_type; // type of vertex which receives message
@@ -96,7 +97,7 @@ public:
         return m_n_value_size;
     }
     int getEdgeValueSize() {
-        m_e_value_size = sizeof(int);
+        m_e_value_size = sizeof(VertexWeit);
         return m_e_value_size;
     }
     int getMessageValueSize() {
@@ -277,25 +278,32 @@ public:
                 for (int64_t i = 0; i < num_vertices; ++i) {
                     vertex_degree->at(vid_map->at(i).first) = vid_map->at(i).second;
                 }
+                for (auto const& c : *vid_map) {
+                    std::cout << vid << ": " 
+                        << c.first << ", " << c.second << "\n"; fflush(stdout);
+                }
                 // free
                 std::vector<pair<int64_t,VertexWeit>>().swap(*vid_map);
 
                 InitAliasTable();
                 InitNegTable();
                 InitSigmoidTable();
+                std::cout<< vid << ": " 
+                    <<"initialize aliastable, negtable, sigmoidtable\n"; fflush(stdout);
 
                 gsl_rng_env_setup();
                 gsl_T = gsl_rng_rand48;
                 gsl_r = gsl_rng_alloc(gsl_T);
                 gsl_rng_set(gsl_r, 314159265);
+                std::cout<< vid << ": " 
+                    << "initialize rand\n"; fflush(stdout);
 
                 // root vertex samples and sends message
                 for (int i = 0; i < parallel_num; ++i) {
                     SampleAndSendMsg();
                 }
-
             } else {
-                // all vertexes initialize vectors superStep 1
+                // all vertices initialize vectors superStep 1
                 VertexVal val = getValue();
                 val.emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
                 val.emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
@@ -308,9 +316,10 @@ public:
             }
         } else {
             // superstep >= 2
-
             if(vid == ROOT){
                 //judge for exit
+                std::cout << vid << ": " 
+                    << "judge for exit\n"; fflush(stdout);
                 if (count < total_samples / parallel_num + 2){
                     if (count - last_count > 10000) {
                         current_sample_count += count - last_count;
@@ -329,9 +338,13 @@ public:
 
             // process message
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
+                std::cout << vid << ": " 
+                    << "process msg...\n"; fflush(stdout);
                 VertexMsg msg = pmsgs->getValue();
                 if (msg.type == 2){
-                    // this is a source vertex and need to send it vector to target and neg vertexes
+                    std::cout << vid << ": " 
+                        << "msg type 2\n"; fflush(stdout);
+                    // this is a source vertex and need to send it vector to target and neg vertices
                     VertexVal val = getValue();
                     VertexMsg message;
                     message.type = 3;
@@ -339,19 +352,21 @@ public:
                     message.source_vertex_type = START;
                     message.rho_m = msg.rho_m;
                     for (int i = 0; i < VERTEX_DIM; ++i) {
-                            message.vec_v[i] = val.emb_vertex[i];
-                        }
+                        message.vec_v[i] = val.emb_vertex[i];
+                    }
                     message.target_id = msg.target_id;
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
                     sendMessageTo(msg.target_id, message);
-                    // send message to negative vertexes of the edge
+                    // send message to negative vertices of the edge
                     for (int j = 0; j < NEG_NUM; ++j) {
                         message.target_id = msg.neg_vid[j];
                         message.target_vertex_type = NEG;
                         sendMessageTo(msg.neg_vid[j], message);
                     }
                 } else if (msg.type == 3){
+                    std::cout << vid << ": " 
+                        << "msg type 3\n"; fflush(stdout);
                     real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
                         // update start vertex
@@ -361,6 +376,8 @@ public:
                         }
 
                     } else if(msg.target_vertex_type == END){
+                        std::cout << vid << ": " 
+                            << "msg target type END\n"; fflush(stdout);
                         // update end vertex
                         VertexVal val = getValue();
                         if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 1, msg.rho_m);
@@ -379,6 +396,8 @@ public:
                         sendMessageTo(msg.source_id, message);
 
                     } else if(msg.target_vertex_type == NEG){
+                        std::cout << vid << ": " 
+                            << "msg target type NEG\n"; fflush(stdout);
                         // update negative vertex
                         VertexVal val = getValue();
                         if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 0, msg.rho_m);
@@ -416,6 +435,7 @@ public:
             msg.neg_vid[d] = neg_table[Rand(seed)];
         }
         sendMessageTo(u, msg);
+        std::cout<< "send msg to " << u << "\n"; fflush(stdout);
     }
 
     /* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
@@ -535,12 +555,12 @@ public:
     // argv[2]: <output path>
     void init(int argc, char* argv[]) {
 
-        setNumHosts(5);
+        setNumHosts(2);
         setHost(0, "localhost", 1411);
         setHost(1, "localhost", 1421);
-        setHost(2, "localhost", 1431);
-        setHost(3, "localhost", 1441);
-        setHost(4, "localhost", 1451);
+        // setHost(2, "localhost", 1431);
+        // setHost(3, "localhost", 1441);
+        // setHost(4, "localhost", 1451);
 
         if (argc < 3) {
            printf ("Usage: %s <input path> <output path>\n", argv[0]);
