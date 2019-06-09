@@ -18,24 +18,19 @@
 
 #define VERTEX_CLASS_NAME(name) LINE##name
 
-#define EPS 1e-6
-#define SAMPLE_NUM 16
-#define NEG_NUM 10
-#define VERTEX_DIM 200
+#define NEG_NUM 2
+#define VERTEX_DIM 10
 #define ROOT 1
 
-#define MAX_STRING 100
 #define SIGMOID_BOUND 6
 #define NEG_SAMPLING_POWER 0.75
 #define NEG_TABLE_SIZE 1e8
 
 #define SIGMOID_TABLE_SIZE 1000
 
-#define total_samples 100000
-
-
-int order = 1; //input parameter order
-int parallel_num = 1;
+#define total_samples 100
+#define ORDER 1 //input parameter order
+#define PARALLEL_NUM 1
 
 typedef float real;
 typedef enum {START, END, NEG} vertex_type;//start, end or negative vertex
@@ -59,7 +54,7 @@ struct VertexMsg{
     /* Type 2 Message: root sends sample edge and vertex data to related
      * vertices */
     /* ---------------------------------2------------------------------------ */
-    int order; // order of proximity
+    // int order; // order of proximity
     int64_t neg_vid[NEG_NUM]; // negative sample vertex array
     /* ---------------------------------------------------------------------- */
 
@@ -299,20 +294,20 @@ public:
                     << "initialize rand\n"; fflush(stdout);
 
                 // root vertex samples and sends message
-                for (int i = 0; i < parallel_num; ++i) {
+                for (int i = 0; i < PARALLEL_NUM; ++i) {
                     SampleAndSendMsg();
                 }
-            } else {
-                // all vertices initialize vectors superStep 1
-                VertexVal * val = mutableValue();
-                val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
-                val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
-                for (int i = 0; i < VERTEX_DIM; ++i) {
-                    val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
-                }
-                for (int i = 0; i < VERTEX_DIM; ++i) {
-                    val->emb_context[i] = 0;
-                }
+            }
+
+            // all vertices initialize vectors superStep 1
+            VertexVal * val = mutableValue();
+            val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
+            val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
+            for (int i = 0; i < VERTEX_DIM; ++i) {
+                val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+            }
+            for (int i = 0; i < VERTEX_DIM; ++i) {
+                val->emb_context[i] = 0;
             }
         } else {
             // superstep >= 2
@@ -320,7 +315,7 @@ public:
                 //judge for exit
                 std::cout << vid << ": " 
                     << "judge for exit\n"; fflush(stdout);
-                if (count < total_samples / parallel_num + 2){
+                if (count < total_samples / PARALLEL_NUM + 2){
                     if (count - last_count > 10000) {
                         current_sample_count += count - last_count;
                         last_count = count;
@@ -330,7 +325,7 @@ public:
                         if (rho < init_rho * 0.0001) rho = init_rho * 0.0001;
                     }
                     // root vertex samples and sends message
-                    for (int i = 0; i < parallel_num; ++i) {
+                    for (int i = 0; i < PARALLEL_NUM; ++i) {
                         SampleAndSendMsg();
                     }
                 }
@@ -358,13 +353,15 @@ public:
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
                     sendMessageTo(msg.target_id, message);
-                    std::cout<< "send msg to END " << msg.target_id << "\n"; fflush(stdout);
+                    std::cout << vid << ": " 
+                        << "send msg to END " << msg.target_id << "\n"; fflush(stdout);
                     // send message to negative vertices of the edge
                     for (int j = 0; j < NEG_NUM; ++j) {
                         message.target_id = msg.neg_vid[j];
                         message.target_vertex_type = NEG;
                         sendMessageTo(msg.neg_vid[j], message);
-                        std::cout<< "send msg to NEG " << msg.neg_vid[j] << "\n"; fflush(stdout);
+                        std::cout << vid << ": " 
+                            << "send msg to NEG " << msg.neg_vid[j] << "\n"; fflush(stdout);
                     }
                 } else if (msg.type == 3){
                     std::cout << vid << ": " 
@@ -382,8 +379,8 @@ public:
                             << "msg target type END\n"; fflush(stdout);
                         // update end vertex
                         VertexVal * val = mutableValue();
-                        if (order == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 1, msg.rho_m);
-                        if (order == 2) Update(msg.vec_v, val->emb_context, vec_error, 1, msg.rho_m);
+                        if (ORDER == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 1, msg.rho_m);
+                        if (ORDER == 2) Update(msg.vec_v, val->emb_context, vec_error, 1, msg.rho_m);
 
                         VertexMsg message;
                         message.type = 3;
@@ -396,14 +393,16 @@ public:
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
                         sendMessageTo(msg.source_id, message);
+                        std::cout << vid << ": " 
+                            << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
 
                     } else if(msg.target_vertex_type == NEG){
                         std::cout << vid << ": " 
                             << "msg target type NEG\n"; fflush(stdout);
                         // update negative vertex
                         VertexVal * val = mutableValue();
-                        if (order == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 0, msg.rho_m);
-                        if (order == 2) Update(msg.vec_v, val->emb_context, vec_error, 0, msg.rho_m);
+                        if (ORDER == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 0, msg.rho_m);
+                        if (ORDER == 2) Update(msg.vec_v, val->emb_context, vec_error, 0, msg.rho_m);
                         VertexMsg message;
                         message.type = 3;
                         message.source_id = vid;
@@ -411,10 +410,14 @@ public:
                         for (int i = 0; i < VERTEX_DIM; ++i) {
                             message.vec_v[i] = vec_error[i];
                         }
+                        std::cout << vid << ": " 
+                            << "end construct Msg\n"; fflush(stdout);
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
                         sendMessageTo(msg.source_id, message);
+                        std::cout << vid << ": " 
+                            << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
                     }
                 }
             }
@@ -430,7 +433,7 @@ public:
         msg.type = 2;
         msg.source_id = u;
         msg.target_id = v;
-        msg.order = order;
+        // msg.order = ORDER;
         msg.rho_m = rho;
         // NEGATIVE SAMPLING
         for (int d = 0; d < NEG_NUM; d++) {
