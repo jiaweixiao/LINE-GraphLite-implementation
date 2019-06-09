@@ -22,7 +22,7 @@ EXAMPLE_ALGOS=Line.so
 example: ${EXAMPLE_ALGOS}
 
 %.so : %.cc
-        ${CXX} ${CFLAGS_COMMON} $< ${LIB_GRAPHALGO} -o $@
+	${CXX} ${CFLAGS_COMMON} $< ${LIB_GRAPHALGO} -o $@
 
 Line.so : Line.cc
 
@@ -31,4 +31,4 @@ Line.so : Line.cc
 # ----------------------------------------------------------------------
 
 clean :
-        rm -rf *.so
+	rm -rf *.so
