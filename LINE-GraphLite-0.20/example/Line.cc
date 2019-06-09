@@ -304,14 +304,14 @@ public:
                 }
             } else {
                 // all vertices initialize vectors superStep 1
-                VertexVal val = getValue();
-                val.emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
-                val.emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
+                VertexVal * val = mutableValue();
+                val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
+                val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
                 for (int i = 0; i < VERTEX_DIM; ++i) {
-                    val.emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+                    val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
                 }
                 for (int i = 0; i < VERTEX_DIM; ++i) {
-                    val.emb_context[i] = 0;
+                    val->emb_context[i] = 0;
                 }
             }
         } else {
@@ -345,7 +345,7 @@ public:
                     std::cout << vid << ": " 
                         << "msg type 2\n"; fflush(stdout);
                     // this is a source vertex and need to send it vector to target and neg vertices
-                    VertexVal val = getValue();
+                    const VertexVal val = getValue();
                     VertexMsg message;
                     message.type = 3;
                     message.source_id = vid;
@@ -358,11 +358,13 @@ public:
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
                     sendMessageTo(msg.target_id, message);
+                    std::cout<< "send msg to END " << msg.target_id << "\n"; fflush(stdout);
                     // send message to negative vertices of the edge
                     for (int j = 0; j < NEG_NUM; ++j) {
                         message.target_id = msg.neg_vid[j];
                         message.target_vertex_type = NEG;
                         sendMessageTo(msg.neg_vid[j], message);
+                        std::cout<< "send msg to NEG " << msg.neg_vid[j] << "\n"; fflush(stdout);
                     }
                 } else if (msg.type == 3){
                     std::cout << vid << ": " 
@@ -370,18 +372,18 @@ public:
                     real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
                         // update start vertex
-                        VertexVal val = getValue();
+                        VertexVal * val = mutableValue();
                         for (int i = 0; i < VERTEX_DIM; ++i) {
-                            val.emb_vertex[i] += msg.vec_v[i];
+                            val->emb_vertex[i] += msg.vec_v[i];
                         }
 
                     } else if(msg.target_vertex_type == END){
                         std::cout << vid << ": " 
                             << "msg target type END\n"; fflush(stdout);
                         // update end vertex
-                        VertexVal val = getValue();
-                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 1, msg.rho_m);
-                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 1, msg.rho_m);
+                        VertexVal * val = mutableValue();
+                        if (order == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 1, msg.rho_m);
+                        if (order == 2) Update(msg.vec_v, val->emb_context, vec_error, 1, msg.rho_m);
 
                         VertexMsg message;
                         message.type = 3;
@@ -399,9 +401,9 @@ public:
                         std::cout << vid << ": " 
                             << "msg target type NEG\n"; fflush(stdout);
                         // update negative vertex
-                        VertexVal val = getValue();
-                        if (order == 1) Update(msg.vec_v, val.emb_vertex, vec_error, 0, msg.rho_m);
-                        if (order == 2) Update(msg.vec_v, val.emb_context, vec_error, 0, msg.rho_m);
+                        VertexVal * val = mutableValue();
+                        if (order == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 0, msg.rho_m);
+                        if (order == 2) Update(msg.vec_v, val->emb_context, vec_error, 0, msg.rho_m);
                         VertexMsg message;
                         message.type = 3;
                         message.source_id = vid;
