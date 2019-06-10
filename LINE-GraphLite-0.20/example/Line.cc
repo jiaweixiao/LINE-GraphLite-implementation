@@ -18,19 +18,21 @@
 
 #define VERTEX_CLASS_NAME(name) LINE##name
 
-#define NEG_NUM 2
-#define VERTEX_DIM 10
+#define VERTEX_DIM 200
+#define ORDER 1 //input parameter order
+#define NEG_NUM 5
+#define TOTAL_SAMPLES 1e6
+#define RHO 0.025
+#define PARALLEL_NUM 1
+
 #define ROOT 1
 
-#define SIGMOID_BOUND 6
 #define NEG_SAMPLING_POWER 0.75
 #define NEG_TABLE_SIZE 1e8
-
+#define SIGMOID_BOUND 6
 #define SIGMOID_TABLE_SIZE 1000
 
-#define TOTAL_SAMPLES 10000
-#define ORDER 1 //input parameter order
-#define PARALLEL_NUM 1
+
 
 typedef float real;
 typedef enum {START, END, NEG} vertex_type;//start, end or negative vertex
@@ -160,13 +162,11 @@ public:
             int n = sprintf(s, "%lld ", (int64_t)vid);
             writeNextResLine(s, n);
             for (int i = 0; i < VERTEX_DIM; ++i) {
-                if(i < VERTEX_DIM-1){
-                    n = sprintf(s, "%f ", val.emb_vertex[i]);
-                }else{
-                    n = sprintf(s, "%f\n", val.emb_vertex[i]);
-                }
+                n = sprintf(s, "%lf ", val.emb_vertex[i]);
                 writeNextResLine(s, n);
             }
+            n = sprintf(s, "\n");
+            writeNextResLine(s, n);
         }
     }
 };
@@ -205,9 +205,12 @@ public:
 
 class VERTEX_CLASS_NAME(): public Vertex <VertexVal, VertexWeit, VertexMsg> {
 private:
-    /* Parameters in ROOT */
-    long long num_edges;
-    real init_rho = 0.025, rho = 0.025;
+    // Parameters for loading graph 
+    bool state = 0; // 0 for loading graph; 1 for updating vertex value
+
+    /* Parameters for ROOT only*/
+    long long num_edges = 0, num_vertices = 0;
+    real init_rho = RHO, rho = RHO;
     long long count = 0, last_count = 0, current_sample_count = 0;
     unsigned long long seed = 1;
     const gsl_rng_type * gsl_T;
@@ -217,7 +220,6 @@ private:
     long long *alias;
     double *prob;
 
-    int num_vertices;
     std::vector<VertexWeit> *edge_weight, *vertex_degree;
     std::vector<int64_t> *edge_source_id, *edge_target_id;
     std::vector<pair<int64_t,VertexWeit>> *vid_map; //{(vid,degree)}
@@ -226,38 +228,64 @@ private:
 
 public:
     void compute(MessageIterator* pmsgs) {
-        if (* (int *)getAggrGlobal(0) > 0 ) {
+        if (* (int *)getAggrGlobal(0) == 1 ) {
+            // update signal
+            state = 1;
+        } else if (* (int *)getAggrGlobal(0) == 2 ) {
+            // halt signal
+            voteToHalt();
+            return ;
+        } else {
+            printf("aggregator error\n"); fflush(stdout);
             voteToHalt();
             return ;
         }
+        
         int64_t vid = getVertexId();
 
         if (getSuperstep() == 0) {
-            // all vertices send edge information to root vertex
-            OutEdgeIterator outEdgeIterator = getOutEdgeIterator();
-            VertexMsg msg;
-            VertexWeit degree = 0;
-            msg.type = 0;
-            msg.source_id = vid;
-            for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {
-                msg.target_id = outEdgeIterator.target();
-                msg.weight = outEdgeIterator.getValue();
-                degree += msg.weight;    
-                sendMessageTo(ROOT, msg);
+            // malloc for pointer-to
+            InitSigmoidTable();
+            VertexVal * val = mutableValue();
+            val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
+            val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
+            for (int i = 0; i < VERTEX_DIM; ++i) {
+                val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
             }
-            msg.type = 1;
-            msg.degree = degree;
-            sendMessageTo(ROOT, msg);
-        } else if (getSuperstep() == 1){
-            // root receives messages and does some initialization
-            if(vid == ROOT){
-                num_edges = 0;
-                num_vertices = 0;
+            for (int i = 0; i < VERTEX_DIM; ++i) {
+                val->emb_context[i] = 0;
+            }
+            if (vid == ROOT) {
                 edge_source_id = new std::vector<int64_t>();
                 edge_target_id = new std::vector<int64_t>();
                 edge_weight = new std::vector<VertexWeit>();
                 vid_map = new std::vector<pair<int64_t,VertexWeit>>();
+            }
+        }
+
+        if (state == 0) {
+            // load graph
+            if (getSuperstep() * RANGE <= superstep && superstep < (getSuperstep()+1) * RANGE) {
+                // vertices in range send edge information to root vertex
+                OutEdgeIterator outEdgeIterator = getOutEdgeIterator();
+                VertexMsg msg;
+                VertexWeit degree = 0;
+                msg.type = 0;
+                msg.source_id = vid;
+                for ( ; ! outEdgeIterator.done(); outEdgeIterator.next() ) {
+                    msg.target_id = outEdgeIterator.target();
+                    msg.weight = outEdgeIterator.getValue();
+                    degree += msg.weight;    
+                    sendMessageTo(ROOT, msg);
+                }
+                msg.type = 1;
+                msg.degree = degree;
+                sendMessageTo(ROOT, msg);
+            }
+            if (vid == ROOT) {
+                // root receives messages
                 // process message
+                int flag = 0;
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
                     VertexMsg msg = pmsgs->getValue();
                     if (msg.type == 0) {
@@ -269,51 +297,41 @@ public:
                     if (msg.type == 1) {
                         vid_map->push_back(pair<int64_t,VertexWeit>(msg.source_id,msg.degree));
                     }
+                    flag++;
                 }
-                num_vertices = vid_map->size();
-                // set vid as the index of vertex_degree
-                vertex_degree = new std::vector<VertexWeit>(num_vertices);
-                for (int64_t i = 0; i < num_vertices; ++i) {
-                    vertex_degree->at(vid_map->at(i).first) = vid_map->at(i).second;
+                if (flag == 0) {
+                    // stop loading graph
+                    num_vertices = vid_map->size();
+                    // set vid as the index of vertex_degree
+                    vertex_degree = new std::vector<VertexWeit>(num_vertices);
+                    for (int64_t i = 0; i < num_vertices; ++i) {
+                        vertex_degree->at(vid_map->at(i).first) = vid_map->at(i).second;
+                    }
+                    // free
+                    std::vector<pair<int64_t,VertexWeit>>().swap(*vid_map);
+
+                    // do some initializations
+                    InitAliasTable();
+                    InitNegTable();
+                    gsl_rng_env_setup();
+                    gsl_T = gsl_rng_rand48;
+                    gsl_r = gsl_rng_alloc(gsl_T);
+                    gsl_rng_set(gsl_r, 314159265);
+                    std::cout<< vid << ": " 
+                        << "finish initialization\n"; fflush(stdout);
+
+                    // inform others to stop loading graph
+                    int one = 1;
+                    accumulateAggr(0, &one);
+
+                    // root vertex samples and sends message
+                    for (int i = 0; i < PARALLEL_NUM; ++i) {
+                        SampleAndSendMsg();
+                    }
                 }
-                for (auto const& c : *vid_map) {
-                    std::cout << vid << ": " 
-                        << c.first << ", " << c.second << "\n"; fflush(stdout);
-                }
-                // free
-                std::vector<pair<int64_t,VertexWeit>>().swap(*vid_map);
-
-                InitAliasTable();
-                InitNegTable();
-                InitSigmoidTable();
-                std::cout<< vid << ": " 
-                    <<"initialize aliastable, negtable, sigmoidtable\n"; fflush(stdout);
-
-                gsl_rng_env_setup();
-                gsl_T = gsl_rng_rand48;
-                gsl_r = gsl_rng_alloc(gsl_T);
-                gsl_rng_set(gsl_r, 314159265);
-                std::cout<< vid << ": " 
-                    << "initialize rand\n"; fflush(stdout);
-
-                // root vertex samples and sends message
-                for (int i = 0; i < PARALLEL_NUM; ++i) {
-                    SampleAndSendMsg();
-                }
-            }
-
-            // all vertices initialize vectors superStep 1
-            VertexVal * val = mutableValue();
-            val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
-            val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
-            for (int i = 0; i < VERTEX_DIM; ++i) {
-                val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
-            }
-            for (int i = 0; i < VERTEX_DIM; ++i) {
-                val->emb_context[i] = 0;
             }
         } else {
-            // superstep >= 2
+            // update vertex value
             if(vid == ROOT){
                 //judge for exit
                 std::cout << vid << ": " 
@@ -333,10 +351,8 @@ public:
                     }
                     count++;
                 } else {
-                    int one = 1;
-                    accumulateAggr(0, &one);
-                    std::cout << vid << ": " 
-                        << "count "<< count<<"\n"; fflush(stdout);
+                    int two = 1;
+                    accumulateAggr(0, &two);
                 }
             }
 
@@ -377,12 +393,13 @@ public:
                         << "msg type 3\n"; fflush(stdout);
                     real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
+                        std::cout << vid << ": " 
+                            << "msg target type START\n"; fflush(stdout);
                         // update start vertex
                         VertexVal * val = mutableValue();
                         for (int i = 0; i < VERTEX_DIM; ++i) {
                             val->emb_vertex[i] += msg.vec_v[i];
                         }
-
                     } else if(msg.target_vertex_type == END){
                         std::cout << vid << ": " 
                             << "msg target type END\n"; fflush(stdout);
@@ -419,8 +436,6 @@ public:
                         for (int i = 0; i < VERTEX_DIM; ++i) {
                             message.vec_v[i] = vec_error[i];
                         }
-                        std::cout << vid << ": " 
-                            << "end construct Msg\n"; fflush(stdout);
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
@@ -569,12 +584,27 @@ public:
     // argv[2]: <output path>
     void init(int argc, char* argv[]) {
 
-        setNumHosts(2);
+        setNumHosts(3);
         setHost(0, "localhost", 1411);
         setHost(1, "localhost", 1421);
-        // setHost(2, "localhost", 1431);
+        setHost(2, "localhost", 1431);
         // setHost(3, "localhost", 1441);
         // setHost(4, "localhost", 1451);
+        // setHost(5, "localhost", 1461);
+        // setHost(6, "localhost", 1471);
+        // setHost(7, "localhost", 1481);
+        // setHost(8, "localhost", 1491);
+        // setHost(9, "localhost", 1511);
+        // setHost(10, "localhost", 1521);
+        // setHost(11, "localhost", 1531);
+        // setHost(12, "localhost", 1541);
+        // setHost(13, "localhost", 1551);
+        // setHost(14, "localhost", 1561);
+        // setHost(15, "localhost", 1571);
+        // setHost(16, "localhost", 1581);
+        // setHost(17, "localhost", 1591);
+        // setHost(18, "localhost", 1611);
+        // setHost(19, "localhost", 1621);
 
         if (argc < 3) {
            printf ("Usage: %s <input path> <output path>\n", argv[0]);
