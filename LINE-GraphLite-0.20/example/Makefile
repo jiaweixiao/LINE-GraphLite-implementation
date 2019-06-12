@@ -4,7 +4,7 @@
 
 CXX= g++
 
-CFLAGS_COMMON=-std=c++0x -g -O2 -lgsl -lm -lgslcblas -I${HADOOP_INCLUDE} -I${GRAPHLITE_HOME}/include
+CFLAGS_COMMON=-std=c++0x -g -O2 -lgsl -lm -lgslcblas -I${HADOOP_HOME}/incldue -I${GRAPHLITE_HOME}/include
 LIB_GRAPHALGO=-fPIC -shared
 
 # ----------------------------------------------------------------------
