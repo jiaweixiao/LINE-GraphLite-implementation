@@ -19,13 +19,14 @@
 #define VERTEX_CLASS_NAME(name) LINE##name
 
 #define VERTEX_DIM 200
-#define ORDER 1 //input parameter order
+#define ORDER 2 //input parameter order
 #define NEG_NUM 5
-#define TOTAL_SAMPLES 1e6
+#define TOTAL_SAMPLES 1e4
 #define RHO 0.025
-#define PARALLEL_NUM 1
+#define PARALLEL_NUM 40
 
-#define ROOT 1
+#define ROOT 0
+#define RANGE 5000 // [superstep * RANGE, (superstep+1) * RANGE)
 
 #define NEG_SAMPLING_POWER 0.75
 #define NEG_TABLE_SIZE 1e8
@@ -174,7 +175,7 @@ public:
 // An aggregator that records a int value which denote the number of vertex that send message
 class VERTEX_CLASS_NAME(Aggregator): public Aggregator<int> {
 private:
-    int k_val; //input parameter K
+    int k_val = 0; //input parameter K
 public:
     void init() {
         m_global = k_val;
@@ -235,37 +236,35 @@ public:
             // halt signal
             voteToHalt();
             return ;
-        } else {
-            printf("aggregator error\n"); fflush(stdout);
-            voteToHalt();
-            return ;
         }
-        
-        int64_t vid = getVertexId();
 
-        if (getSuperstep() == 0) {
-            // malloc for pointer-to
-            InitSigmoidTable();
-            VertexVal * val = mutableValue();
-            val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
-            val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
-            for (int i = 0; i < VERTEX_DIM; ++i) {
-                val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
-            }
-            for (int i = 0; i < VERTEX_DIM; ++i) {
-                val->emb_context[i] = 0;
-            }
-            if (vid == ROOT) {
-                edge_source_id = new std::vector<int64_t>();
-                edge_target_id = new std::vector<int64_t>();
-                edge_weight = new std::vector<VertexWeit>();
-                vid_map = new std::vector<pair<int64_t,VertexWeit>>();
-            }
-        }
+        int64_t vid = getVertexId();
 
         if (state == 0) {
             // load graph
-            if (getSuperstep() * RANGE <= superstep && superstep < (getSuperstep()+1) * RANGE) {
+            if (getSuperstep() * RANGE <= vid && vid < (getSuperstep()+1) * RANGE) {
+                // malloc for pointer-to
+                // std::cout<< vid << ": " 
+                //        << "initialize\n"; fflush(stdout);
+                InitSigmoidTable();
+                VertexVal * val = mutableValue();
+                val->emb_vertex = (real *)malloc(VERTEX_DIM*sizeof(real));
+                val->emb_context = (real *)malloc(VERTEX_DIM*sizeof(real));
+                for (int i = 0; i < VERTEX_DIM; ++i) {
+                    val->emb_vertex[i] =  (rand() / (real)RAND_MAX - 0.5) / VERTEX_DIM;
+                }
+                for (int i = 0; i < VERTEX_DIM; ++i) {
+                    val->emb_context[i] = 0;
+                }
+                if (vid == ROOT) {
+                    edge_source_id = new std::vector<int64_t>();
+                    edge_target_id = new std::vector<int64_t>();
+                    edge_weight = new std::vector<VertexWeit>();
+                    vid_map = new std::vector<pair<int64_t,VertexWeit>>();
+                }
+
+                //std::cout<< vid << ": " 
+                //        << "construct msg\n"; fflush(stdout);
                 // vertices in range send edge information to root vertex
                 OutEdgeIterator outEdgeIterator = getOutEdgeIterator();
                 VertexMsg msg;
@@ -281,11 +280,13 @@ public:
                 msg.type = 1;
                 msg.degree = degree;
                 sendMessageTo(ROOT, msg);
+                // std::cout<< vid << ": " 
+                //        << "sent msg\n"; fflush(stdout);
             }
-            if (vid == ROOT) {
+            if (vid == ROOT && getSuperstep() != 0) {
                 // root receives messages
                 // process message
-                int flag = 0;
+                long long flag = 0;
                 for ( ; ! pmsgs->done(); pmsgs->next() ) {
                     VertexMsg msg = pmsgs->getValue();
                     if (msg.type == 0) {
@@ -317,8 +318,8 @@ public:
                     gsl_T = gsl_rng_rand48;
                     gsl_r = gsl_rng_alloc(gsl_T);
                     gsl_rng_set(gsl_r, 314159265);
-                    std::cout<< vid << ": " 
-                        << "finish initialization\n"; fflush(stdout);
+                    //std::cout<< vid << ": " 
+                    //    << "finish initialization\n"; fflush(stdout);
 
                     // inform others to stop loading graph
                     int one = 1;
@@ -328,6 +329,9 @@ public:
                     for (int i = 0; i < PARALLEL_NUM; ++i) {
                         SampleAndSendMsg();
                     }
+
+                    //std::cout << vid << ": " 
+                    //    << "finish state 0\n"; fflush(stdout);
                 }
             }
         } else {
@@ -351,19 +355,19 @@ public:
                     }
                     count++;
                 } else {
-                    int two = 1;
+                    int two = 2;
                     accumulateAggr(0, &two);
                 }
             }
 
             // process message
             for ( ; ! pmsgs->done(); pmsgs->next() ) {
-                std::cout << vid << ": " 
-                    << "process msg...\n"; fflush(stdout);
+                //std::cout << vid << ": " 
+                //    << "process msg...\n"; fflush(stdout);
                 VertexMsg msg = pmsgs->getValue();
                 if (msg.type == 2){
-                    std::cout << vid << ": " 
-                        << "msg type 2\n"; fflush(stdout);
+                    //std::cout << vid << ": " 
+                    //    << "msg type 2\n"; fflush(stdout);
                     // this is a source vertex and need to send it vector to target and neg vertices
                     const VertexVal val = getValue();
                     VertexMsg message;
@@ -378,31 +382,31 @@ public:
                     message.target_vertex_type = END;
                     // send message to end vertex of the edge
                     sendMessageTo(msg.target_id, message);
-                    std::cout << vid << ": " 
-                        << "send msg to END " << msg.target_id << "\n"; fflush(stdout);
+                    //std::cout << vid << ": " 
+                    //    << "send msg to END " << msg.target_id << "\n"; fflush(stdout);
                     // send message to negative vertices of the edge
                     for (int j = 0; j < NEG_NUM; ++j) {
                         message.target_id = msg.neg_vid[j];
                         message.target_vertex_type = NEG;
                         sendMessageTo(msg.neg_vid[j], message);
-                        std::cout << vid << ": " 
-                            << "send msg to NEG " << msg.neg_vid[j] << "\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "send msg to NEG " << msg.neg_vid[j] << "\n"; fflush(stdout);
                     }
                 } else if (msg.type == 3){
-                    std::cout << vid << ": " 
-                        << "msg type 3\n"; fflush(stdout);
+                    //std::cout << vid << ": " 
+                    //    << "msg type 3\n"; fflush(stdout);
                     real vec_error[VERTEX_DIM]={0};
                     if(msg.target_vertex_type == START){
-                        std::cout << vid << ": " 
-                            << "msg target type START\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "msg target type START\n"; fflush(stdout);
                         // update start vertex
                         VertexVal * val = mutableValue();
                         for (int i = 0; i < VERTEX_DIM; ++i) {
                             val->emb_vertex[i] += msg.vec_v[i];
                         }
                     } else if(msg.target_vertex_type == END){
-                        std::cout << vid << ": " 
-                            << "msg target type END\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "msg target type END\n"; fflush(stdout);
                         // update end vertex
                         VertexVal * val = mutableValue();
                         if (ORDER == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 1, msg.rho_m);
@@ -413,18 +417,18 @@ public:
                         message.source_id = vid;
                         message.source_vertex_type = END;
                         for (int i = 0; i < VERTEX_DIM; ++i) {
-                            message.vec_v[i] = vec_error[i];
+                        	message.vec_v[i] = vec_error[i];
                         }
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
                         sendMessageTo(msg.source_id, message);
-                        std::cout << vid << ": " 
-                            << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
 
                     } else if(msg.target_vertex_type == NEG){
-                        std::cout << vid << ": " 
-                            << "msg target type NEG\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "msg target type NEG\n"; fflush(stdout);
                         // update negative vertex
                         VertexVal * val = mutableValue();
                         if (ORDER == 1) Update(msg.vec_v, val->emb_vertex, vec_error, 0, msg.rho_m);
@@ -434,14 +438,14 @@ public:
                         message.source_id = vid;
                         message.source_vertex_type = NEG;
                         for (int i = 0; i < VERTEX_DIM; ++i) {
-                            message.vec_v[i] = vec_error[i];
+                        	message.vec_v[i] = vec_error[i];
                         }
                         message.target_id = msg.source_id;
                         message.target_vertex_type = START;
                         // send message to start vertex of the edge
                         sendMessageTo(msg.source_id, message);
-                        std::cout << vid << ": " 
-                            << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
+                        //std::cout << vid << ": " 
+                        //    << "send msg to START " << msg.source_id << "\n"; fflush(stdout);
                     }
                 }
             }
@@ -464,57 +468,57 @@ public:
             msg.neg_vid[d] = neg_table[Rand(seed)];
         }
         sendMessageTo(u, msg);
-        std::cout<< "send msg to " << u << "\n"; fflush(stdout);
+        // std::cout<< "send msg to " << u << "\n"; fflush(stdout);
     }
 
-    /* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
+	/* The alias sampling algorithm, which is used to sample an edge in O(1) time. */
     void InitAliasTable() {
-        alias = (long long *)malloc(num_edges*sizeof(long long));
-        prob = (double *)malloc(num_edges*sizeof(double));
-        if (alias == NULL || prob == NULL) {
-            printf("Error: memory allocation failed!\n");
-            exit(1);
-        }
-        double *norm_prob = (double *)malloc(num_edges*sizeof(double));
-        long long *large_block = (long long *)malloc(num_edges*sizeof(long long));
-        long long *small_block = (long long *)malloc(num_edges*sizeof(long long));
-        if (norm_prob == NULL || large_block == NULL || small_block == NULL) {
-            printf("Error: memory allocatiion failed!\n");
-            exit(1);
-        }
+    	alias = (long long *)malloc(num_edges*sizeof(long long));
+    	prob = (double *)malloc(num_edges*sizeof(double));
+    	if (alias == NULL || prob == NULL) {
+    		printf("Error: memory allocation failed!\n");
+    		exit(1);
+    	}
+    	double *norm_prob = (double *)malloc(num_edges*sizeof(double));
+    	long long *large_block = (long long *)malloc(num_edges*sizeof(long long));
+    	long long *small_block = (long long *)malloc(num_edges*sizeof(long long));
+    	if (norm_prob == NULL || large_block == NULL || small_block == NULL) {
+    		printf("Error: memory allocatiion failed!\n");
+    		exit(1);
+    	}
 
-        double sum = 0;
-        long long cur_small_block, cur_large_block;
-        long long num_small_block = 0, num_large_block = 0;
+    	double sum = 0;
+    	long long cur_small_block, cur_large_block;
+    	long long num_small_block = 0, num_large_block = 0;
 
-        for (long long k = 0; k != num_edges; k++) sum += edge_weight->at(k);
-        for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight->at(k) * num_edges / sum;
+    	for (long long k = 0; k != num_edges; k++) sum += edge_weight->at(k);
+    	for (long long k = 0; k != num_edges; k++) norm_prob[k] = edge_weight->at(k) * num_edges / sum;
 
-        for (long long k = num_edges - 1; k >= 0; k--) {
-            if (norm_prob[k] < 1)
-                small_block[num_small_block++] = k;
-            else
-                large_block[num_large_block++] = k;
-        }
+    	for (long long k = num_edges - 1; k >= 0; k--) {
+    		if (norm_prob[k] < 1)
+    			small_block[num_small_block++] = k;
+    		else
+    			large_block[num_large_block++] = k;
+    	}
 
-        while (num_small_block && num_large_block) {
-            cur_small_block = small_block[--num_small_block];
-            cur_large_block = large_block[--num_large_block];
-            prob[cur_small_block] = norm_prob[cur_small_block];
-            alias[cur_small_block] = cur_large_block;
-            norm_prob[cur_large_block] = norm_prob[cur_large_block] + norm_prob[cur_small_block] - 1;
-            if (norm_prob[cur_large_block] < 1)
-                small_block[num_small_block++] = cur_large_block;
-            else
-                large_block[num_large_block++] = cur_large_block;
-        }
+    	while (num_small_block && num_large_block) {
+    		cur_small_block = small_block[--num_small_block];
+    		cur_large_block = large_block[--num_large_block];
+    		prob[cur_small_block] = norm_prob[cur_small_block];
+    		alias[cur_small_block] = cur_large_block;
+    		norm_prob[cur_large_block] = norm_prob[cur_large_block] + norm_prob[cur_small_block] - 1;
+    		if (norm_prob[cur_large_block] < 1)
+    			small_block[num_small_block++] = cur_large_block;
+    		else
+    			large_block[num_large_block++] = cur_large_block;
+    	}
 
-        while (num_large_block) prob[large_block[--num_large_block]] = 1;
-        while (num_small_block) prob[small_block[--num_small_block]] = 1;
+    	while (num_large_block) prob[large_block[--num_large_block]] = 1;
+    	while (num_small_block) prob[small_block[--num_small_block]] = 1;
 
-        free(norm_prob);
-        free(small_block);
-        free(large_block);
+    	free(norm_prob);
+    	free(small_block);
+    	free(large_block);
     }
     
     long long SampleAnEdge(double rand_value1, double rand_value2) {
@@ -584,27 +588,13 @@ public:
     // argv[2]: <output path>
     void init(int argc, char* argv[]) {
 
-        setNumHosts(3);
+        setNumHosts(2);
         setHost(0, "localhost", 1411);
         setHost(1, "localhost", 1421);
-        setHost(2, "localhost", 1431);
+        // setHost(2, "localhost", 1431);
         // setHost(3, "localhost", 1441);
         // setHost(4, "localhost", 1451);
         // setHost(5, "localhost", 1461);
-        // setHost(6, "localhost", 1471);
-        // setHost(7, "localhost", 1481);
-        // setHost(8, "localhost", 1491);
-        // setHost(9, "localhost", 1511);
-        // setHost(10, "localhost", 1521);
-        // setHost(11, "localhost", 1531);
-        // setHost(12, "localhost", 1541);
-        // setHost(13, "localhost", 1551);
-        // setHost(14, "localhost", 1561);
-        // setHost(15, "localhost", 1571);
-        // setHost(16, "localhost", 1581);
-        // setHost(17, "localhost", 1591);
-        // setHost(18, "localhost", 1611);
-        // setHost(19, "localhost", 1621);
 
         if (argc < 3) {
            printf ("Usage: %s <input path> <output path>\n", argv[0]);
