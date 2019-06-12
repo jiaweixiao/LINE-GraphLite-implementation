@@ -3,8 +3,8 @@ import os
 
 fi = open("../experiment/net_youtube_dense.txt", 'r')
 fo = open("net_youtube_dense_t", 'w')
-fo.write("336934\n")
-fo.write("46598619\n")
+fo.write("336934\n")   # number of vertices
+fo.write("46598619\n") # number of edges
 dic = dict()
 count = 0
 for line in fi:
