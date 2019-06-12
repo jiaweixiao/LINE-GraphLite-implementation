@@ -8,15 +8,18 @@ g++ -lm -pthread -Ofast -march=native -Wall -funroll-loops -ffast-math -Wno-unus
 wget http://socialnetworks.mpi-sws.mpg.de/data/youtube-links.txt.gz
 gunzip youtube-links.txt.gz
 
-python3 preprocess_youtube.py youtube-links.txt net_youtube.txt
+python preprocess_youtube.py youtube-links.txt net_youtube.txt
 ./reconstruct -train net_youtube.txt -output net_youtube_dense.txt -depth 2 -threshold 1000
+cd ../Input
+python mapto.py
+
+cd ..
+./bin setenv
+make
+hash-partitioner.pl Input/net_youtube_dense.txt 1
+start-graphlite engine/Line.so example/Line.so Input/net_youtube_dense_t_1w Output_order1_thread40_e5/out
+
+cd ../Input
+python mapback.py
 # ./line -train net_youtube_dense.txt -output vec_1st_wo_norm.txt -binary 1 -size 128 -order 1 -negative 5 -samples 10000 -threads 40
 # ./line -train net_youtube_dense.txt -output vec_2nd_wo_norm.txt -binary 1 -size 128 -order 2 -negative 5 -samples 10000 -threads 40
-./normalize -input vec_1st_wo_norm.txt -output vec_1st.txt -binary 1
-./normalize -input vec_2nd_wo_norm.txt -output vec_2nd.txt -binary 1
-./concatenate -input1 vec_1st.txt -input2 vec_2nd.txt -output vec_all.txt -binary 1
-
-cd evaluate
-./run.sh ../vec_all.txt
-python3 score.py result.txt
-cd ..
